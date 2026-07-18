@@ -42,7 +42,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          version="$(git describe --tags --always)"
+          version="$(git describe --tags --exclude edge --always)"
           printf 'Rolling prerelease built from the latest `master` (`%s`).\n\nVersion `%s`. Replaced on every push to master and reset when a new `vX.Y.Z` release is tagged. **Not for production use.**\n' "$GITHUB_SHA" "$version" > notes.md
           # Replace the previous edge release + tag so it always points at latest master.
           gh release delete edge --cleanup-tag --yes || true

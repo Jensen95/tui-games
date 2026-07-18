@@ -6,6 +6,13 @@ version: 2
 
 project_name: lig
 
+git:
+  # The rolling `edge` prerelease tag is a release-channel pointer, not a
+  # version: without this, snapshot builds on a commit carrying it derive
+  # .Version from "edge" (not semver) and the snapshot template fails.
+  ignore_tags:
+    - edge
+
 builds:
   - main: ./cmd/lig
     binary: lig
