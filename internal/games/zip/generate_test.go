@@ -113,6 +113,102 @@ func assertWaypointsContiguousInPathOrder(t *testing.T, p Puzzle, s Solution) {
 	}
 }
 
+// expertStallFloor is the minimum fraction of Expert puzzles that must stall
+// the forced-move (logic) ladder over the seed sweep. Expert's whole reason to
+// exist is that it "may require limited search" (docs/plan/docs/02-engine-and-
+// generation.md tiers table); if a clear majority did NOT stall, Expert would
+// be statistically indistinguishable from Hard — the exact defect this tier was
+// built to fix. The generator rejects logic-closable candidates, so the true
+// stall rate is ~100%; the threshold is set well below that so the test asserts
+// the property robustly without ever flaking on a loaded box.
+const expertStallFloor = 0.60
+
+// TestGenerator_Expert_UniqueValidAndMostlyStalls is the Expert-tier property
+// test. Unlike the no-guess tiers (TestGenerator_Invariant_PerSeed), Expert is
+// NOT required to close under the logic ladder — it only guarantees exactly one
+// solution. This test pins the Expert contract across the LIG_SEEDS seed sweep:
+//
+//   - every Expert puzzle's recorded solution is Valid (Solved == true);
+//   - every Expert puzzle is uniquely solvable (CountSolutions(cap=2) == 1) —
+//     the non-negotiable guarantee shared with every other tier;
+//   - walls lie only on non-solution edges and waypoints are a contiguous 1..K
+//     in path order (same structural invariants as the other tiers);
+//   - a clear majority of generated Expert puzzles STALL the logic ladder
+//     (LogicSolve closes == false), i.e. they genuinely require search.
+func TestGenerator_Expert_UniqueValidAndMostlyStalls(t *testing.T) {
+	n := seedCount()
+	gen := Generator{}
+	val := Validator{}
+	sol := Solver{}
+
+	stalled := 0
+	for seed := 1; seed <= n; seed++ {
+		p, s, err := mustGenerate(t, gen, engine.Expert, engine.NewRand(int64(seed)))
+		if err != nil {
+			t.Fatalf("Generate(expert, seed=%d) error: %v", seed, err)
+		}
+
+		// The recorded solution must be Valid.
+		b := Board{Puzzle: p, Path: s.Path}
+		if !mustSolved(t, val, b) {
+			t.Errorf("seed=%d: Validator.Solved(recorded solution) = false, want true", seed)
+		}
+
+		// Exactly one solution — non-negotiable even for Expert.
+		if got := mustCountSolutions(t, sol, p, 2); got != 1 {
+			t.Errorf("seed=%d: CountSolutions(p, cap=2) = %d, want 1 (unique)", seed, got)
+		}
+
+		// Same structural invariants as the no-guess tiers.
+		assertWallsOffSolution(t, p, s)
+		assertWaypointsContiguousInPathOrder(t, p, s)
+
+		// Expert must NOT be required to close under the logic ladder; count how
+		// many genuinely stall (need search).
+		if _, closed, _ := mustLogicSolve(t, sol, p); !closed {
+			stalled++
+		}
+	}
+
+	rate := float64(stalled) / float64(n)
+	if rate < expertStallFloor {
+		t.Errorf("Expert stall rate = %.1f%% (%d/%d), want >= %.0f%%: Expert puzzles must mostly require search, else they are indistinguishable from Hard",
+			100*rate, stalled, n, 100*expertStallFloor)
+	}
+}
+
+// TestVerify_AcceptsExpert_WithoutLogicClosure pins the Verify/label coherence
+// required for Expert: Entry().Verify re-checks the generation invariant from
+// the encoded clues alone, and for Expert that invariant is uniqueness only —
+// it must NOT demand logic closure. A generated Expert puzzle that stalls the
+// ladder must still verify.
+func TestVerify_AcceptsExpert_WithoutLogicClosure(t *testing.T) {
+	n := seedCount()
+	if n > 50 {
+		n = 50 // Verify re-runs the complete solver; a slice of the sweep suffices.
+	}
+	entry := Entry()
+	gen := Generator{}
+	sol := Solver{}
+
+	sawStall := false
+	for seed := 1; seed <= n; seed++ {
+		p, _, err := mustGenerate(t, gen, engine.Expert, engine.NewRand(int64(seed)))
+		if err != nil {
+			t.Fatalf("Generate(expert, seed=%d) error: %v", seed, err)
+		}
+		if _, closed, _ := mustLogicSolve(t, sol, p); !closed {
+			sawStall = true
+		}
+		if err := entry.Verify(Encode(p)); err != nil {
+			t.Errorf("seed=%d: Entry().Verify rejected a valid Expert puzzle: %v", seed, err)
+		}
+	}
+	if !sawStall {
+		t.Errorf("expected at least one Expert puzzle in the first %d seeds to stall the logic ladder; the test would not be exercising the no-logic-closure path otherwise", n)
+	}
+}
+
 // TestGenerator_Determinism_SameSeedSamePuzzle pins docs/plan/games/zip.md's
 // "Determinism: same seed => identical puzzle" requirement. Bounded to a
 // single difficulty band (still honoring LIG_SEEDS for the seed count) so

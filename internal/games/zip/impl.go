@@ -610,7 +610,14 @@ func targetWaypoints(diff engine.Difficulty, N int) int {
 		k = N * 55 / 100
 	case engine.Medium:
 		k = N * 40 / 100
-	default: // Hard, Expert
+	case engine.Expert:
+		// Expert is deliberately the sparsest tier: far fewer numbered
+		// checkpoints than Hard. Sparse waypoints starve the forced-move
+		// (logic) ladder of the deductions it relies on, so uniqueness has to
+		// come from walls alone and the ladder usually stalls at a branch
+		// point — exactly the "requires limited search" property Expert wants.
+		k = N * 12 / 100
+	default: // Hard
 		k = N * 30 / 100
 	}
 	if k < 2 {
@@ -717,6 +724,70 @@ func buildUnique(path []int, R, C int, diff engine.Difficulty, r *rand.Rand) (Pu
 	return Puzzle{}, false
 }
 
+// buildUniqueExpert carves an Expert puzzle out of a fixed solution path. It
+// reaches uniqueness the same way buildUnique does — repeatedly walling an
+// off-solution edge that an alternative solution relies on — but deliberately
+// stops there: it does NOT keep adding waypoints to force the logic ladder to
+// close. Expert only promises exactly one solution (CountSolutions == 1); it
+// may require limited search (see docs/plan/docs/02-engine-and-generation.md's
+// tiers table), so logic closure is not required and, ideally, does not happen.
+//
+// It returns the puzzle, whether the forced-move ladder closes it (closedByLogic),
+// and ok. Uniqueness is non-negotiable; closedByLogic is reported so the caller
+// can prefer candidates that genuinely stall the ladder.
+func buildUniqueExpert(path []int, R, C int, r *rand.Rand) (Puzzle, bool, bool) {
+	N := R * C
+
+	interior := make([]int, 0, N-2)
+	for i := 1; i < N-1; i++ {
+		interior = append(interior, i)
+	}
+	shuffleInts(interior, r)
+
+	chosen := make([]bool, N)
+	chosen[0] = true
+	chosen[N-1] = true
+	startK := targetWaypoints(engine.Expert, N) - 2
+	if startK < 0 {
+		startK = 0
+	}
+	next := 0
+	for ; next < startK && next < len(interior); next++ {
+		chosen[interior[next]] = true
+	}
+
+	walls := make(map[[2]int]bool)
+
+	const maxIter = 4000
+	for iter := 0; iter < maxIter; iter++ {
+		p := makePuzzleFromChosen(path, R, C, chosen, walls, engine.Expert)
+		if !solvedCheck(p, path) {
+			return Puzzle{}, false, false // should never happen
+		}
+		if alt, has := firstAltSolution(p, path); has {
+			// Kill this alternative with a targeted off-solution wall.
+			if edge, ok := edgeInAltNotPath(alt, path); ok && !walls[edge] {
+				walls[edge] = true
+				continue
+			}
+			// Fallback: constrain further with an extra waypoint. (In practice
+			// unreachable — two distinct Hamiltonian paths always differ by an
+			// off-solution edge — but kept so termination never depends on it.)
+			if next < len(interior) {
+				chosen[interior[next]] = true
+				next++
+				continue
+			}
+			return Puzzle{}, false, false
+		}
+		// Unique. Do NOT force logic closure — just report whether the ladder
+		// happens to close, so the caller can prefer a stalling puzzle.
+		_, closed := logicSolvePath(p)
+		return p, closed, true
+	}
+	return Puzzle{}, false, false
+}
+
 func equalInts(a, b []int) bool {
 	if len(a) != len(b) {
 		return false
@@ -732,6 +803,9 @@ func equalInts(a, b []int) bool {
 func generateZip(diff engine.Difficulty, r *rand.Rand) (Puzzle, Solution, error) {
 	R, C := sizeFor(diff)
 	const maxAttempts = 200
+	if diff == engine.Expert {
+		return generateExpert(R, C, r, maxAttempts)
+	}
 	for attempt := 0; attempt < maxAttempts; attempt++ {
 		path := randomHamiltonian(R, C, r)
 		if p, ok := buildUnique(path, R, C, diff, r); ok {
@@ -739,6 +813,41 @@ func generateZip(diff engine.Difficulty, r *rand.Rand) (Puzzle, Solution, error)
 		}
 	}
 	return Puzzle{}, Solution{}, fmt.Errorf("zip: generation failed after %d attempts", maxAttempts)
+}
+
+// generateExpert produces an Expert puzzle: uniquely solvable (CountSolutions
+// == 1, non-negotiable) but preferably NOT closable by the forced-move logic
+// ladder, so it genuinely requires limited search. It keeps trying fresh random
+// solutions, rejecting any candidate the ladder closes; if every bounded attempt
+// closes (rare), it falls back to accepting the first unique candidate so
+// Generate stays total and never errors on account of the stall preference.
+func generateExpert(R, C int, r *rand.Rand, maxAttempts int) (Puzzle, Solution, error) {
+	var fallbackP Puzzle
+	var fallbackPath []int
+	haveFallback := false
+
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		path := randomHamiltonian(R, C, r)
+		p, closedByLogic, ok := buildUniqueExpert(path, R, C, r)
+		if !ok {
+			continue
+		}
+		if !closedByLogic {
+			// Ideal Expert: unique but the ladder stalls (needs search).
+			return p, Solution{Path: append([]int(nil), path...)}, nil
+		}
+		// Unique but logic-closable — too easy for Expert. Remember the first
+		// one as a fallback and keep looking for a stalling candidate.
+		if !haveFallback {
+			fallbackP = p
+			fallbackPath = append([]int(nil), path...)
+			haveFallback = true
+		}
+	}
+	if haveFallback {
+		return fallbackP, Solution{Path: fallbackPath}, nil
+	}
+	return Puzzle{}, Solution{}, fmt.Errorf("zip: expert generation failed after %d attempts", maxAttempts)
 }
 
 // ---------------------------------------------------------------------------

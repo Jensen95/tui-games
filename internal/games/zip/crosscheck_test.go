@@ -67,6 +67,54 @@ func TestCrossCheck_AgreesWithPrimary_GeneratedPuzzles(t *testing.T) {
 	}
 }
 
+// TestCrossCheck_Expert_AgreesWithPrimary is the Expert-tier companion to
+// TestCrossCheck_AgreesWithPrimary_GeneratedPuzzles. Expert puzzles are NOT
+// required to close under the logic ladder, but their uniqueness guarantee is
+// just as non-negotiable — so the independent complete solver must still agree
+// with the primary solver on the count (1) and on the single solution path.
+// This keeps the "second solver agrees on the unique solution" cross-validation
+// invariant covering Expert even though the LogicSolve-closure crosscheck
+// deliberately excludes it.
+func TestCrossCheck_Expert_AgreesWithPrimary(t *testing.T) {
+	n := seedCount()
+	gen := Generator{}
+	primary := Solver{}
+
+	for seed := 1; seed <= n; seed++ {
+		seed := seed
+		t.Run(diffSeedName(engine.Expert, seed), func(t *testing.T) {
+			p, genSol, err := mustGenerate(t, gen, engine.Expert, engine.NewRand(int64(seed)))
+			if err != nil {
+				t.Fatalf("Generate(expert, seed=%d) error: %v", seed, err)
+			}
+
+			primaryCount := mustCountSolutions(t, primary, p, 2)
+			crossCount, crossPath := crossCountSolutions(p, 2)
+
+			if primaryCount != crossCount {
+				t.Fatalf("solution count mismatch: primary=%d cross=%d (seed=%d, expert)", primaryCount, crossCount, seed)
+			}
+			if primaryCount != 1 {
+				t.Fatalf("expected a unique Expert solution, both solvers report count=%d (seed=%d)", primaryCount, seed)
+			}
+
+			primarySol, ok := mustSolve(t, primary, p)
+			if !ok {
+				t.Fatalf("primary Solve returned ok=false despite CountSolutions=1")
+			}
+			if !reflect.DeepEqual(primarySol.Path, crossPath) {
+				t.Errorf("solver disagreement on unique Expert solution:\n  primary: %v\n  cross:   %v", primarySol.Path, crossPath)
+			}
+			if !reflect.DeepEqual(genSol.Path, crossPath) {
+				t.Errorf("cross solver's path disagrees with the generator's recorded Expert solution:\n  generated: %v\n  cross:     %v", genSol.Path, crossPath)
+			}
+			if !crossIsValidComplete(p, crossPath) {
+				t.Errorf("cross solver's own Expert solution fails its independent Solved-state re-check: %v", crossPath)
+			}
+		})
+	}
+}
+
 // TestCrossCheck_LogicSolve_MatchesIndependentComplete pins the spec's
 // cross-validation invariant (docs/plan/docs/02-engine-and-generation.md):
 // "LogicSolve output, when it closes, must equal the complete solver's
