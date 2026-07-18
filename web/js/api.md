@@ -3,7 +3,7 @@
 This is the contract two UI agents build against. It is produced by
 `web/wasm/*.go` (built with `GOOS=js GOARCH=wasm go build -o lig.wasm
 ./web/wasm`) and loaded into the page alongside `wasm_exec.js`. It exposes
-**one** global object, `globalThis.ligEngine`, with four synchronous
+**one** global object, `globalThis.ligEngine`, with five synchronous
 functions. Every function takes and returns **JSON-encoded strings** (never
 raw JS objects) unless noted otherwise. `JSON.parse`/`JSON.stringify` at the
 call site.
@@ -15,7 +15,7 @@ field of a response.
 
 ## Loading / readiness
 
-The wasm program does real work in `main()` (registering the four
+The wasm program does real work in `main()` (registering the five
 functions) and then blocks forever (`select {}`) so the Go runtime stays
 alive to service calls. Because instantiation is asynchronous, **do not**
 call `ligEngine.*` until it signals readiness:
@@ -131,14 +131,101 @@ solution, so in practice they coincide, but `solved()` is the authoritative
 win check; never re-derive it from `violations()` being empty, since an
 empty board also has no violations).
 
+### `hint(gameId, puzzleJSON, boardJSON, solutionJSON)`
+
+```
+hint(gameId: string, puzzleJSON: string, boardJSON: string, solutionJSON: string) -> string
+  // JSON: {
+  //   "done": bool,
+  //   "message": string,
+  //   "technique": string,
+  //   "cells": [{"row":int,"col":int}, ...],
+  //   "apply": <game-specific, see below>
+  // }
+  // or: {"error": string}
+```
+
+Same `puzzleJSON`/`boardJSON` as `violations`/`solved`. `solutionJSON` is the
+`solution` value `generate()` returned for this puzzle (`JSON.stringify` it
+if you parsed it, or keep the raw string around — exactly like `puzzleJSON`).
+This reveals **exactly one** forced move toward that recorded solution, the
+same move each game's TUI `H` hint key reveals (see
+`internal/tui/boards/*.go`'s `Hint()` methods) — it never re-derives a move
+from `violations`/`solved` itself, and it never invents a move `solved()`
+wouldn't accept.
+
+- **`done`** — `true` when there is nothing left to hint (the board is
+  already a complete solution, or — Zip/Patches/Mini Sudoku only, see
+  below — no solution was recorded to hint from). When `done` is `true`,
+  `cells` is `[]` and `apply` is absent; don't try to mutate anything.
+  `message` still explains why (e.g. `"already solved"`).
+- **`message`** — always a short, human-readable line describing the move,
+  safe to show verbatim in a status line (e.g.
+  `"hint: r2c4 = 3 (hidden single)"`, `"hint: queen at r3c5"`,
+  `"hint: extend path to r1c1"`, `"hint: rectangle r0c1..r0c2"`). Row/column
+  numbers in `message` are **1-indexed** for human display — everywhere else
+  in this bridge (including this same response's `cells`/`apply`) stays
+  0-indexed, per this doc's shared conventions.
+- **`technique`** — the deepest logic technique the move needed, when the
+  game can name one. Only Mini Sudoku currently populates this (one of
+  `"given"`, `"naked-single"`, `"hidden-single"`, `"naked-pair"`,
+  `"hidden-pair"`, `"pointing-pair"`, or the fallback `"solution"` when even
+  the no-guessing solver stalled and the cell had to be revealed directly —
+  see `internal/games/minisudoku/logicsolve.go`). Every other game always
+  returns `""` — the key is always present, never omitted, so callers don't
+  need an existence check, only an emptiness one.
+- **`cells`** — every cell the move touches, for highlighting (e.g. Queens'
+  hint may list both the cleared old queen cell and the newly placed one).
+- **`apply`** — the mutation the UI should perform, **before** calling
+  `violations`/`solved` again. Its shape is per-game, exactly like every
+  other board JSON in this doc:
+  - **Tango, Queens, Mini Sudoku**: `{"cells": [{"row":r,"col":c,"value":v}, ...]}`
+    — a short list of absolute cell writes into `board.cells`. Queens'
+    "move the queen" is a clear (`value: 0`) of the wrong cell (only if one
+    is present and not a given) followed by a set (`value: 1`) of the
+    correct one (only if it's not a given); Tango/Mini Sudoku are always a
+    single write. Apply every entry in order; each is a plain
+    `board.cells[row][col] = value` assignment (Queens: 0/1, Tango: 0/1/2,
+    Mini Sudoku: 0-6).
+  - **Zip**: `{"path": [{"row":r,"col":c}, ...]}` — the full replacement
+    path (`board.path` always round-trips as a whole array, never
+    incrementally, per this doc's Zip section). Replace `board.path`'s
+    contents with this array.
+  - **Patches**: `{"r0":int,"c0":int,"r1":int,"c1":int}` — one rectangle's
+    bounding box (inclusive on both ends) to reveal. Before writing it,
+    clear every cell of any rectangle(s) currently overlapping this box **in
+    full** (reset their whole label to `-1`, not just the overlapping
+    cells — mirrors `internal/tui/boards/patches.go`'s `applyHintRect`),
+    then write a single fresh label across every cell in the box.
+
+Worked example (Mini Sudoku, one empty cell left, solvable by a hidden
+single):
+
+```json
+{
+  "done": false,
+  "message": "hint: r6c6 = 4 (hidden-single)",
+  "technique": "hidden-single",
+  "cells": [{"row":5,"col":5}],
+  "apply": {"cells": [{"row":5,"col":5,"value":4}]}
+}
+```
+
+Worked example (any game, nothing left to hint):
+
+```json
+{"done": true, "message": "already solved", "cells": [], "apply": null}
+```
+
 ### Errors
 
 Every function returns `{"error": "<message>"}` (and nothing else) when:
 
 - `gameId` is not a registered game id,
 - `difficulty` is not one of the four valid names,
-- `puzzleJSON`/`boardJSON` fails to parse or fails a shape/bounds check
-  (wrong dimensions, out-of-range indices, malformed JSON), or
+- `puzzleJSON`/`boardJSON`/`solutionJSON` fails to parse or fails a
+  shape/bounds check (wrong dimensions, out-of-range indices, malformed
+  JSON), or
 - anything else internally goes wrong (including a recovered panic).
 
 Examples (captured from a real build):

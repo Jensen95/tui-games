@@ -30,6 +30,7 @@ func main() {
 	ligEngine.Set("generate", wrapJS(generateHandler))
 	ligEngine.Set("violations", wrapJS(violationsHandler))
 	ligEngine.Set("solved", wrapJS(solvedHandler))
+	ligEngine.Set("hint", wrapJS(hintHandler))
 	js.Global().Set("ligEngine", ligEngine)
 
 	js.Global().Set("ligEngineReady", js.ValueOf(true))
@@ -169,6 +170,32 @@ func solvedHandler(args []js.Value) (string, error) {
 		return "", err
 	}
 	b, err := json.Marshal(map[string]bool{"solved": ok})
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
+}
+
+// hintHandler implements
+// globalThis.ligEngine.hint(gameId, puzzleJSON, boardJSON, solutionJSON).
+func hintHandler(args []js.Value) (string, error) {
+	if len(args) < 4 {
+		return "", fmt.Errorf("hint: want 4 args (gameId, puzzleJSON, boardJSON, solutionJSON), got %d", len(args))
+	}
+	gameID := args[0].String()
+	puzzleJSON := args[1].String()
+	boardJSON := args[2].String()
+	solutionJSON := args[3].String()
+
+	a, err := lookupAdapter(gameID)
+	if err != nil {
+		return "", err
+	}
+	res, err := a.hint([]byte(puzzleJSON), []byte(boardJSON), []byte(solutionJSON))
+	if err != nil {
+		return "", err
+	}
+	b, err := json.Marshal(res)
 	if err != nil {
 		return "", err
 	}

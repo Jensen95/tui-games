@@ -148,3 +148,72 @@ func (a queensAdapter) solved(puzzleJSON, boardJSON []byte) (bool, error) {
 	}
 	return queens.NewValidator().Solved(b), nil
 }
+
+// hint mirrors internal/tui/boards/queens.go's Hint(): scanning rows in
+// order, the first row whose queen doesn't match the recorded solution gets
+// fixed — clearing any (non-given) queen already in that row, then placing
+// the queen (skipping either half that would touch a given cell).
+func (a queensAdapter) hint(puzzleJSON, boardJSON, solutionJSON []byte) (hintResultJSON, error) {
+	p, b, err := a.decode(puzzleJSON, boardJSON)
+	if err != nil {
+		return hintResultJSON{}, err
+	}
+	var sol queensSolutionWire
+	if err := json.Unmarshal(solutionJSON, &sol); err != nil {
+		return hintResultJSON{}, fmt.Errorf("queens: decode solution: %w", err)
+	}
+	n := p.N
+	if len(sol.Cells) != n {
+		return hintResultJSON{}, fmt.Errorf("queens: solution has %d rows, want %d", len(sol.Cells), n)
+	}
+
+	given := make(map[int]bool, len(p.Givens))
+	for _, idx := range p.Givens {
+		given[idx] = true
+	}
+
+	for row := 0; row < n; row++ {
+		if len(sol.Cells[row]) != n {
+			return hintResultJSON{}, fmt.Errorf("queens: solution row %d has %d cols, want %d", row, len(sol.Cells[row]), n)
+		}
+		wantCol := -1
+		for c := 0; c < n; c++ {
+			if sol.Cells[row][c] == int(queens.Queen) {
+				wantCol = c
+				break
+			}
+		}
+		if wantCol < 0 {
+			continue // malformed solution row -- skip rather than fail the whole hint
+		}
+
+		curCol := -1
+		for c := 0; c < n; c++ {
+			if b.Cells[row*n+c] == queens.Queen {
+				curCol = c
+				break
+			}
+		}
+		if curCol == wantCol {
+			continue
+		}
+
+		var writes []cellWrite
+		cellsHi := make([]cellJSON, 0, 2)
+		if curCol != -1 && !given[row*n+curCol] {
+			writes = append(writes, cellWrite{Row: row, Col: curCol, Value: int(queens.Empty)})
+			cellsHi = append(cellsHi, cellJSON{Row: row, Col: curCol})
+		}
+		if !given[row*n+wantCol] {
+			writes = append(writes, cellWrite{Row: row, Col: wantCol, Value: int(queens.Queen)})
+		}
+		cellsHi = append(cellsHi, cellJSON{Row: row, Col: wantCol})
+
+		return hintResultJSON{
+			Message: fmt.Sprintf("hint: queen at r%dc%d", row+1, wantCol+1),
+			Cells:   cellsHi,
+			Apply:   marshalApply(cellsApply{Cells: writes}),
+		}, nil
+	}
+	return hintResultJSON{Done: true, Message: "already solved"}, nil
+}

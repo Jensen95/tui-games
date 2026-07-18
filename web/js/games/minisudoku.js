@@ -11,8 +11,16 @@
 // the cursor/selection; digits are entered via the keyboard (1-6, Shift+1-6
 // for notes) or the on-screen keypad rendered below the grid so the game is
 // fully playable on a phone with no physical keyboard.
+//
+// The board's own tap-to-move-cursor is resolved via a single grid-level
+// pointerdown listener + api.cellAt (rect math), not a listener per cell
+// button -- see web/js/games/README.md's "Pointer/touch: dead zones". The
+// on-screen keypad/tools buttons below the grid have no such dead-zone risk
+// (nothing else is ever rendered between them) so they stay plain click
+// listeners.
 
 export const id = "minisudoku";
+const HINT_PULSE_MS = 900;
 
 export function create(container, api, bundle) {
   const board = bundle.board;
@@ -29,7 +37,6 @@ export function create(container, api, bundle) {
   let cursor = { row: 0, col: 0 };
   let noteMode = false;
   const notes = Array.from({ length: rows }, () => Array.from({ length: cols }, () => new Set()));
-  const unbindFns = [];
 
   container.innerHTML = "";
   const shell = document.createElement("div");
@@ -76,17 +83,20 @@ export function create(container, api, bundle) {
 
       grid.appendChild(cell);
       rowEls.push({ el: cell, notesEl, valueEl });
-
-      unbindFns.push(
-        api.bindPointer(cell, {
-          onPrimary: () => setCursor(r, c),
-          onSecondary: () => setCursor(r, c),
-        })
-      );
     }
     cellEls.push(rowEls);
   }
   shell.appendChild(grid);
+
+  // Grid-level tap-to-move-cursor -- see the header comment. A plain click
+  // (or tap) anywhere in the grid resolves to the nearest cell via
+  // api.cellAt, never a per-cell listener.
+  function onGridPointerDown(ev) {
+    if (typeof ev.button === "number" && ev.button !== 0) return;
+    const hit = api.cellAt(grid, rows, cols, ev.clientX, ev.clientY);
+    setCursor(hit.row, hit.col);
+  }
+  grid.addEventListener("pointerdown", onGridPointerDown);
 
   // On-screen keypad: always rendered (not just on coarse-pointer/narrow
   // viewports -- keeping it up on desktop too is simplest and harmless, per
@@ -196,6 +206,15 @@ export function create(container, api, bundle) {
   }
 
   function handleKey(event) {
+    // Checked before api.cursorMove -- see games/tango.js's handleKey for
+    // why (lowercase `h` is vim-motion "left"; Shift+H is the hint
+    // shortcut).
+    if (event.shiftKey && (event.key === "h" || event.key === "H")) {
+      event.preventDefault();
+      performHint();
+      return true;
+    }
+
     const delta = api.cursorMove(event);
     if (delta) {
       event.preventDefault();
@@ -233,12 +252,41 @@ export function create(container, api, bundle) {
     return false;
   }
 
+  function pulseHintCells(cells) {
+    for (const c of cells) {
+      const entry = cellEls[c.row] && cellEls[c.row][c.col];
+      if (!entry) continue;
+      entry.el.classList.add("hint-pulse");
+      window.setTimeout(() => entry.el.classList.remove("hint-pulse"), HINT_PULSE_MS);
+    }
+  }
+
+  // See web/js/games/README.md's "Hints" section.
+  async function performHint() {
+    const result = await api.hint(board);
+    if (!result) return null;
+    if (result.done) {
+      api.onHint(result.message);
+      return result;
+    }
+    for (const w of result.apply.cells) {
+      board.cells[w.row][w.col] = w.value;
+      notes[w.row][w.col].clear();
+    }
+    if (result.cells.length > 0) setCursor(result.cells[0].row, result.cells[0].col);
+    render();
+    pulseHintCells(result.cells);
+    await runChecks();
+    api.onHint(result.message);
+    return result;
+  }
+
   function destroy() {
-    for (const unbind of unbindFns) unbind();
+    grid.removeEventListener("pointerdown", onGridPointerDown);
     container.innerHTML = "";
   }
 
-  return { handleKey, destroy };
+  return { handleKey, destroy, hint: performHint };
 }
 
 function clamp(v, lo, hi) {

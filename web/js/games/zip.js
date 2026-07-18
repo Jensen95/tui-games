@@ -19,8 +19,13 @@
 // SVG overlay (a polyline through cell centers, in viewBox units so it
 // scales with the grid); waypoint numbers are bold text baked into each
 // cell; walls are short bars pinned to the boundary between two cells.
+//
+// Every pointerdown/move resolves its cell via api.cellAt (rect math)
+// rather than elementFromPoint/event.target, per web/js/games/README.md's
+// "Pointer/touch: dead zones" -- a fast drag has no gap to fall through.
 
 export const id = "zip";
+const HINT_PULSE_MS = 900;
 
 let stylesInjected = false;
 function ensureStyles() {
@@ -184,21 +189,11 @@ export function create(container, api, bundle) {
     path.push({ row: r, col: c });
   }
 
-  function cellAtPoint(x, y) {
-    const el = document.elementFromPoint(x, y);
-    const cellEl = el && el.closest ? el.closest(".zip-cell") : null;
-    if (!cellEl) return null;
-    return { row: Number(cellEl.dataset.row), col: Number(cellEl.dataset.col) };
-  }
-
   function onPointerDown(ev) {
     if (typeof ev.button === "number" && ev.button > 0) return;
-    const cellEl = ev.target.closest(".zip-cell");
-    if (!cellEl) return;
-    const row = Number(cellEl.dataset.row);
-    const col = Number(cellEl.dataset.col);
+    const { row, col } = api.cellAt(grid, rows, cols, ev.clientX, ev.clientY);
     try {
-      cellEl.setPointerCapture(ev.pointerId);
+      grid.setPointerCapture(ev.pointerId);
     } catch {
       /* not every pointer type supports capture -- harmless if it throws */
     }
@@ -232,9 +227,7 @@ export function create(container, api, bundle) {
 
   function onPointerMove(ev) {
     if (!dragging || path.length === 0) return;
-    const hit = cellAtPoint(ev.clientX, ev.clientY);
-    if (!hit) return;
-    const { row, col } = hit;
+    const { row, col } = api.cellAt(grid, rows, cols, ev.clientX, ev.clientY);
     const last = path[path.length - 1];
     if (row === last.row && col === last.col) return;
 
@@ -364,6 +357,15 @@ export function create(container, api, bundle) {
   }
 
   function handleKey(event) {
+    // Checked before api.cursorMove -- see games/tango.js's handleKey for
+    // why (lowercase `h` is vim-motion "left"; Shift+H is the hint
+    // shortcut).
+    if (event.shiftKey && (event.key === "h" || event.key === "H")) {
+      event.preventDefault();
+      performHint();
+      return true;
+    }
+
     const delta = api.cursorMove(event);
     if (delta) {
       event.preventDefault();
@@ -395,6 +397,38 @@ export function create(container, api, bundle) {
     return false;
   }
 
+  function pulseHintCells(cells) {
+    for (const c of cells) {
+      const cellEl = cellEls[c.row] && cellEls[c.row][c.col];
+      if (!cellEl) continue;
+      cellEl.classList.add("hint-pulse");
+      window.setTimeout(() => cellEl.classList.remove("hint-pulse"), HINT_PULSE_MS);
+    }
+  }
+
+  // See web/js/games/README.md's "Hints" section. apply.path is the full
+  // replacement path (board.path always round-trips as a whole array, per
+  // api.md) -- mutate the existing `path` array in place rather than
+  // reassigning board.path, since `path` above is an alias every other
+  // function in this module already closes over.
+  async function performHint() {
+    const result = await api.hint(board);
+    if (!result) return null;
+    if (result.done) {
+      api.onHint(result.message);
+      return result;
+    }
+    path.length = 0;
+    for (const p of result.apply.path) path.push({ row: p.row, col: p.col });
+    penDown = true;
+    if (path.length > 0) cursor = { ...path[path.length - 1] };
+    render();
+    pulseHintCells(result.cells);
+    await runChecks();
+    api.onHint(result.message);
+    return result;
+  }
+
   function destroy() {
     grid.removeEventListener("pointerdown", onPointerDown);
     window.removeEventListener("pointermove", onPointerMove);
@@ -403,7 +437,7 @@ export function create(container, api, bundle) {
     container.innerHTML = "";
   }
 
-  return { handleKey, destroy };
+  return { handleKey, destroy, hint: performHint };
 }
 
 function clamp(v, lo, hi) {

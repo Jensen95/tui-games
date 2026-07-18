@@ -179,3 +179,46 @@ func (a tangoAdapter) solved(puzzleJSON, boardJSON []byte) (bool, error) {
 	}
 	return tango.Validator{}.Solved(b), nil
 }
+
+func tangoSymbolName(v int) string {
+	switch tango.Symbol(v) {
+	case tango.Sun:
+		return "sun"
+	case tango.Moon:
+		return "moon"
+	default:
+		return "empty"
+	}
+}
+
+// hint mirrors internal/tui/boards/tango.go's Hint(): the first empty cell
+// (in row-major order) is filled with the recorded solution's value there.
+// No rule is re-derived — the solution is authoritative.
+func (a tangoAdapter) hint(puzzleJSON, boardJSON, solutionJSON []byte) (hintResultJSON, error) {
+	p, b, err := a.decode(puzzleJSON, boardJSON)
+	if err != nil {
+		return hintResultJSON{}, err
+	}
+	var sol tangoSolutionWire
+	if err := json.Unmarshal(solutionJSON, &sol); err != nil {
+		return hintResultJSON{}, fmt.Errorf("tango: decode solution: %w", err)
+	}
+	solFlat, ferr := flattenIntGrid(sol.Cells, p.N, p.N)
+	if ferr != nil {
+		return hintResultJSON{}, fmt.Errorf("tango: decode solution: %w", ferr)
+	}
+
+	for idx, sym := range b.Cells {
+		if sym != tango.Empty {
+			continue
+		}
+		cell := engine.CellAt(idx, p.N)
+		val := solFlat[idx]
+		return hintResultJSON{
+			Message: fmt.Sprintf("hint: r%dc%d = %s", cell.Row+1, cell.Col+1, tangoSymbolName(val)),
+			Cells:   []cellJSON{{Row: cell.Row, Col: cell.Col}},
+			Apply:   marshalApply(cellsApply{Cells: []cellWrite{{Row: cell.Row, Col: cell.Col, Value: val}}}),
+		}, nil
+	}
+	return hintResultJSON{Done: true, Message: "board is already full"}, nil
+}

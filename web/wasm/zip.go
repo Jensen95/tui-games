@@ -175,3 +175,46 @@ func (a zipAdapter) solved(puzzleJSON, boardJSON []byte) (bool, error) {
 	}
 	return zip.Validator{}.Solved(b), nil
 }
+
+// pathApply is the Apply payload shape for Zip hints: the full replacement
+// path (board.path round-trips as a whole array per api.md, never
+// incrementally), extended by exactly one cell beyond the player's current
+// path's longest prefix shared with the recorded solution.
+type pathApply struct {
+	Path []cellJSON `json:"path"`
+}
+
+// hint mirrors internal/tui/boards/zip.go's Hint(): find the longest prefix
+// the player's path shares with the recorded solution path, then extend it
+// by exactly the next solution cell.
+func (a zipAdapter) hint(puzzleJSON, boardJSON, solutionJSON []byte) (hintResultJSON, error) {
+	p, b, err := a.decode(puzzleJSON, boardJSON)
+	if err != nil {
+		return hintResultJSON{}, err
+	}
+	var sol zipSolutionWire
+	if err := json.Unmarshal(solutionJSON, &sol); err != nil {
+		return hintResultJSON{}, fmt.Errorf("zip: decode solution: %w", err)
+	}
+	solPath := zipCellsToPath(sol.Path, p.C)
+	if len(solPath) == 0 {
+		return hintResultJSON{Done: true, Message: "no solution recorded"}, nil
+	}
+
+	i := 0
+	for i < len(b.Path) && i < len(solPath) && b.Path[i] == solPath[i] {
+		i++
+	}
+	if i >= len(solPath) {
+		return hintResultJSON{Done: true, Message: "path is already complete"}, nil
+	}
+
+	next := solPath[i]
+	newPath := append(append([]int(nil), solPath[:i]...), next)
+	cell := engine.CellAt(next, p.C)
+	return hintResultJSON{
+		Message: fmt.Sprintf("hint: extend path to r%dc%d", cell.Row+1, cell.Col+1),
+		Cells:   []cellJSON{{Row: cell.Row, Col: cell.Col}},
+		Apply:   marshalApply(pathApply{Path: zipPathToCells(newPath, p.C)}),
+	}, nil
+}

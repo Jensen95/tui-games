@@ -26,11 +26,20 @@
 //     of any single cell's tap-cycle.
 //   - long-press (~500ms), right-click, or shift-click clears a cell
 //     (both its X mark and any queen) outright.
+//
+// N can reach 11, so this board is the one most likely to end up "dinky" on
+// a phone (reported bug: taps between cell boundaries not registering).
+// Every hit test below resolves through api.cellAt (rect math -- see
+// web/js/games/README.md's "Pointer/touch: dead zones") rather than
+// elementFromPoint/event.target, so there is no gap a tap or drag point can
+// land in and be dropped -- not on a region border, not on a cell's
+// boundary, not on a CSS Grid 1fr rounding seam.
 
 export const id = "queens";
 
 const REGION_TUNED = 6; // how many hand-tuned colors CSS provides (--region-0..5)
 const LONG_PRESS_MS = 500;
+const HINT_PULSE_MS = 900;
 
 let stylesInjected = false;
 function ensureStyles() {
@@ -188,13 +197,6 @@ export function create(container, api, bundle) {
     }
   }
 
-  function cellAtPoint(x, y) {
-    const el = document.elementFromPoint(x, y);
-    const cellEl = el && el.closest ? el.closest(".queens-cell") : null;
-    if (!cellEl) return null;
-    return { row: Number(cellEl.dataset.row), col: Number(cellEl.dataset.col) };
-  }
-
   function endDrag() {
     clearLongPressTimer();
     window.removeEventListener("pointermove", onPointerMove);
@@ -206,10 +208,7 @@ export function create(container, api, bundle) {
 
   function onPointerDown(ev) {
     if (typeof ev.button === "number" && ev.button > 0) return;
-    const cellEl = ev.target.closest(".queens-cell");
-    if (!cellEl) return;
-    const row = Number(cellEl.dataset.row);
-    const col = Number(cellEl.dataset.col);
+    const { row, col } = api.cellAt(grid, n, n, ev.clientX, ev.clientY);
     if (board.givens[row][col]) return;
 
     ev.preventDefault();
@@ -221,7 +220,7 @@ export function create(container, api, bundle) {
     }
 
     try {
-      cellEl.setPointerCapture(ev.pointerId);
+      grid.setPointerCapture(ev.pointerId);
     } catch {
       /* not every pointer type supports capture -- harmless if it throws */
     }
@@ -243,8 +242,7 @@ export function create(container, api, bundle) {
 
   function onPointerMove(ev) {
     if (!dragAnchor) return;
-    const hit = cellAtPoint(ev.clientX, ev.clientY);
-    if (!hit) return;
+    const hit = api.cellAt(grid, n, n, ev.clientX, ev.clientY);
     if (hit.row === dragAnchor.row && hit.col === dragAnchor.col && !dragMoved) return;
 
     if (!dragMoved) {
@@ -274,11 +272,8 @@ export function create(container, api, bundle) {
   }
 
   function onContextMenu(ev) {
-    const cellEl = ev.target.closest(".queens-cell");
-    if (!cellEl) return;
     ev.preventDefault();
-    const row = Number(cellEl.dataset.row);
-    const col = Number(cellEl.dataset.col);
+    const { row, col } = api.cellAt(grid, n, n, ev.clientX, ev.clientY);
     endDrag();
     clearCellState(row, col);
   }
@@ -313,6 +308,15 @@ export function create(container, api, bundle) {
   }
 
   function handleKey(event) {
+    // Checked before api.cursorMove -- see games/tango.js's handleKey for
+    // why (lowercase `h`/`x` are reserved elsewhere; Shift+H is the hint
+    // shortcut).
+    if (event.shiftKey && (event.key === "h" || event.key === "H")) {
+      event.preventDefault();
+      performHint();
+      return true;
+    }
+
     const delta = api.cursorMove(event);
     if (delta) {
       event.preventDefault();
@@ -340,6 +344,37 @@ export function create(container, api, bundle) {
     return false;
   }
 
+  function pulseHintCells(cells) {
+    for (const c of cells) {
+      const entry = cellEls[c.row] && cellEls[c.row][c.col];
+      if (!entry) continue;
+      entry.el.classList.add("hint-pulse");
+      window.setTimeout(() => entry.el.classList.remove("hint-pulse"), HINT_PULSE_MS);
+    }
+  }
+
+  // See web/js/games/README.md's "Hints" section. Queens' hint.apply.cells
+  // may clear a wrongly-placed queen (value 0) before setting the correct
+  // one (value 1) -- X marks are untouched either way (no engine
+  // representation, see the header comment).
+  async function performHint() {
+    const result = await api.hint(board);
+    if (!result) return null;
+    if (result.done) {
+      api.onHint(result.message);
+      return result;
+    }
+    for (const w of result.apply.cells) {
+      board.cells[w.row][w.col] = w.value;
+    }
+    if (result.cells.length > 0) setCursor(result.cells[0].row, result.cells[0].col);
+    render();
+    pulseHintCells(result.cells);
+    await runChecks();
+    api.onHint(result.message);
+    return result;
+  }
+
   function destroy() {
     endDrag();
     grid.removeEventListener("pointerdown", onPointerDown);
@@ -347,7 +382,7 @@ export function create(container, api, bundle) {
     container.innerHTML = "";
   }
 
-  return { handleKey, destroy };
+  return { handleKey, destroy, hint: performHint };
 }
 
 // Indices 0-5 use the hand-tuned, colorblind-checked palette from the theme

@@ -41,8 +41,13 @@
 // other rule in this game. For cosmetic region coloring (mirrors
 // games/queens.js's regionColor()), each placed rectangle looks up which
 // clue (if any) its label's bounding box actually contains.
+//
+// Every pointerdown/move resolves its cell via api.cellAt (rect math)
+// rather than elementFromPoint/event.target, per web/js/games/README.md's
+// "Pointer/touch: dead zones" -- a fast drag has no gap to fall through.
 
 export const id = "patches";
+const HINT_PULSE_MS = 900;
 
 const REGION_TUNED = 6; // how many hand-tuned colors CSS provides (--region-0..5)
 const SHAPES = ["square", "wide", "tall", "free"];
@@ -270,19 +275,9 @@ export function create(container, api, bundle) {
     render();
   }
 
-  function cellAtPoint(x, y) {
-    const el = document.elementFromPoint(x, y);
-    const cellEl = el && el.closest ? el.closest(".patches-cell") : null;
-    if (!cellEl) return null;
-    return { row: Number(cellEl.dataset.row), col: Number(cellEl.dataset.col) };
-  }
-
   function onPointerDown(ev) {
     if (typeof ev.button === "number" && ev.button > 0) return;
-    const cellEl = ev.target.closest(".patches-cell");
-    if (!cellEl) return;
-    const row = Number(cellEl.dataset.row);
-    const col = Number(cellEl.dataset.col);
+    const { row, col } = api.cellAt(grid, rows, cols, ev.clientX, ev.clientY);
 
     if (awaitingSecondTap) {
       // Completing (or redirecting) a two-tap rectangle: this pointerdown
@@ -319,7 +314,7 @@ export function create(container, api, bundle) {
     // this module's header comment on why the anchor isn't restricted to
     // clue cells).
     try {
-      cellEl.setPointerCapture(ev.pointerId);
+      grid.setPointerCapture(ev.pointerId);
     } catch {
       /* not every pointer type supports capture -- harmless if it throws */
     }
@@ -336,8 +331,7 @@ export function create(container, api, bundle) {
 
   function onPointerMove(ev) {
     if (!dragging) return;
-    const hit = cellAtPoint(ev.clientX, ev.clientY);
-    if (!hit) return;
+    const hit = api.cellAt(grid, rows, cols, ev.clientX, ev.clientY);
     dragCurrent = hit;
     cursor = { ...hit };
     render();
@@ -460,6 +454,15 @@ export function create(container, api, bundle) {
   }
 
   function handleKey(event) {
+    // Checked before api.cursorMove -- see games/tango.js's handleKey for
+    // why (lowercase `h`/`x` are reserved elsewhere; Shift+H is the hint
+    // shortcut).
+    if (event.shiftKey && (event.key === "h" || event.key === "H")) {
+      event.preventDefault();
+      performHint();
+      return true;
+    }
+
     const delta = api.cursorMove(event);
     if (delta) {
       event.preventDefault();
@@ -494,13 +497,68 @@ export function create(container, api, bundle) {
     return false;
   }
 
+  function pulseHintCells(cells) {
+    for (const c of cells) {
+      const cellEl = cellEls[c.row] && cellEls[c.row][c.col];
+      if (!cellEl) continue;
+      cellEl.classList.add("hint-pulse");
+      window.setTimeout(() => cellEl.classList.remove("hint-pulse"), HINT_PULSE_MS);
+    }
+  }
+
+  // See web/js/games/README.md's "Hints" section. apply is
+  // {r0,c0,r1,c1} -- one rectangle's inclusive bounding box to reveal.
+  // Mirrors internal/tui/boards/patches.go's applyHintRect: fully clear any
+  // rectangle(s) currently overlapping the box (not just the overlapping
+  // cells) before planting a fresh label across the whole box, and abandon
+  // any pending anchor (a hint takes priority over an in-progress
+  // two-tap/drag rectangle, exactly like tapping a placed rectangle does).
+  async function performHint() {
+    const result = await api.hint(board);
+    if (!result) return null;
+    if (result.done) {
+      api.onHint(result.message);
+      return result;
+    }
+    const { r0, c0, r1, c1 } = result.apply;
+    const stale = new Set();
+    for (let r = r0; r <= r1; r++) {
+      for (let c = c0; c <= c1; c++) {
+        const l = board.labels[r][c];
+        if (l !== -1) stale.add(l);
+      }
+    }
+    for (const l of stale) {
+      for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < cols; c++) {
+          if (board.labels[r][c] === l) board.labels[r][c] = -1;
+        }
+      }
+    }
+    const label = labelCounter++;
+    for (let r = r0; r <= r1; r++) {
+      for (let c = c0; c <= c1; c++) {
+        board.labels[r][c] = label;
+      }
+    }
+    anchor = null;
+    dragCurrent = null;
+    awaitingSecondTap = false;
+    cursor = { row: r0, col: c0 };
+    render();
+    pulseHintCells(result.cells);
+    await runChecks();
+    api.onHint(result.message);
+    return result;
+  }
+
   function destroy() {
     grid.removeEventListener("pointerdown", onPointerDown);
     detachDragListeners();
     container.innerHTML = "";
   }
 
-  return { handleKey, destroy };
+  return { handleKey, destroy, hint: performHint };
 }
 
 // Indices 0-5 use the hand-tuned, colorblind-checked palette from the theme

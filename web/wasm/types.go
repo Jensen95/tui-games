@@ -76,6 +76,67 @@ type gameAdapter interface {
 	// solved decodes puzzleJSON/boardJSON and reports whether the board is
 	// a complete, fully valid solution.
 	solved(puzzleJSON, boardJSON []byte) (bool, error)
+	// hint decodes puzzleJSON/boardJSON/solutionJSON and returns exactly one
+	// forced move toward the recorded solution, mirroring that game's
+	// internal/tui/boards adapter's Hint() method. See hintResultJSON's doc
+	// comment and web/js/api.md's "hint()" section for the wire contract.
+	hint(puzzleJSON, boardJSON, solutionJSON []byte) (hintResultJSON, error)
+}
+
+// hintResultJSON is the wire shape returned by globalThis.ligEngine.hint().
+// Every game's hint() returns this same envelope; only the shape of Apply
+// varies per game (documented per-game in web/js/api.md, exactly like every
+// other board JSON shape in this bridge).
+//
+//   - Done is true when there is no move left to give (the board is already
+//     solved, or no solution was recorded) — Message still describes why,
+//     but Cells/Apply are empty/nil and the UI should not try to mutate
+//     anything.
+//   - Message is always a short, human-readable line describing the move
+//     (and, where a technique is known, naming it) — safe to show verbatim
+//     in a status line.
+//   - Technique is the deepest logic technique used to derive the move,
+//     when the game can name one (currently only Mini Sudoku; "" otherwise
+//     — never omit the key, an empty string is the documented "unknown"
+//     value so callers don't need an existence check).
+//   - Cells lists every cell the move touches, for highlighting.
+//   - Apply is the game-specific board mutation the UI should perform; see
+//     cellsApply (Tango/Queens/Mini Sudoku), pathApply (Zip), and rectApply
+//     (Patches) below.
+type hintResultJSON struct {
+	Done      bool            `json:"done"`
+	Message   string          `json:"message"`
+	Technique string          `json:"technique"`
+	Cells     []cellJSON      `json:"cells"`
+	Apply     json.RawMessage `json:"apply,omitempty"`
+}
+
+// cellWrite is one absolute-value cell mutation: set board.cells[row][col]
+// to value. Tango/Queens/Mini Sudoku hints all reduce to a short list of
+// these (Queens' "move the queen" is expressed as a clear (value 0) of the
+// old cell followed by a set (value 1) of the new one).
+type cellWrite struct {
+	Row   int `json:"row"`
+	Col   int `json:"col"`
+	Value int `json:"value"`
+}
+
+// cellsApply is the Apply payload shape for Tango/Queens/Mini Sudoku hints:
+// {"cells": [{"row":r,"col":c,"value":v}, ...]}.
+type cellsApply struct {
+	Cells []cellWrite `json:"cells"`
+}
+
+// marshalApply marshals a hint's Apply payload, falling back to a literal
+// JSON null on the (unreachable in practice) event that v — always one of
+// this file's own plain structs — somehow fails to marshal, so a hint
+// response is never itself malformed.
+func marshalApply(v any) json.RawMessage {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return json.RawMessage("null")
+	}
+	return b
 }
 
 // adapters is populated by each per-game file's init().

@@ -32,6 +32,8 @@ const el = {
   screenPlay: document.getElementById("screen-play"),
   menuBtn: document.getElementById("menu-btn"),
   resetBtn: document.getElementById("reset-btn"),
+  hintBtn: document.getElementById("hint-btn"),
+  hintStatus: document.getElementById("hint-status"),
   playTitle: document.getElementById("play-title"),
   playDifficulty: document.getElementById("play-difficulty"),
   playSeed: document.getElementById("play-seed"),
@@ -118,6 +120,7 @@ function wireMenuControls() {
   el.winMenuBtn.addEventListener("click", () => goToMenu());
   el.resetBtn.addEventListener("click", () => restartSession());
   el.winNewBtn.addEventListener("click", () => restartSession());
+  el.hintBtn.addEventListener("click", () => requestHint());
 }
 
 function setDifficulty(difficulty) {
@@ -222,6 +225,7 @@ async function startGame(gameId) {
   el.playSeed.textContent = `seed ${state.seed}`;
   el.boardContainer.innerHTML = "";
   el.winOverlay.hidden = true;
+  clearHintStatus();
 
   const bundle = {
     puzzle: bundleData.puzzle,
@@ -242,7 +246,7 @@ async function startGame(gameId) {
     timerHandle: null,
   };
 
-  const api = buildAPI(gameId, bundleData.puzzle, () => onSessionSolved(session));
+  const api = buildAPI(gameId, bundleData.puzzle, bundleData.solution, () => onSessionSolved(session));
   session.instance = mod.create(el.boardContainer, api, bundle);
 
   startTimer(session);
@@ -272,6 +276,7 @@ function endSession() {
   }
   el.boardContainer.innerHTML = "";
   el.winOverlay.hidden = true;
+  clearHintStatus();
   session = null;
 }
 
@@ -281,7 +286,7 @@ function showScreen(screen) {
   el.screenPlay.hidden = screen !== "play";
 }
 
-function buildAPI(gameId, puzzle, onSolvedCallback) {
+function buildAPI(gameId, puzzle, solution, onSolvedCallback) {
   let solvedReported = false;
   return {
     gameId,
@@ -306,6 +311,20 @@ function buildAPI(gameId, puzzle, onSolvedCallback) {
       }
     },
 
+    // See web/js/api.md's hint() section for the {done, message, technique,
+    // cells, apply} shape. Resolves to `null` on an engine-level error
+    // (already reported via onError/reportBridgeError below), mirroring
+    // violations()/solved()'s error handling -- callers don't need a
+    // try/catch at every call site.
+    async hint(board) {
+      try {
+        return await engine.hint(gameId, puzzle, board, solution);
+      } catch (err) {
+        reportBridgeError(err);
+        return null;
+      }
+    },
+
     onSolved() {
       if (solvedReported) return;
       solvedReported = true;
@@ -316,8 +335,17 @@ function buildAPI(gameId, puzzle, onSolvedCallback) {
       reportBridgeError(err);
     },
 
+    // Called by a game module every time it performs a hint (whether
+    // triggered by the shared Hint button or the `H` key), so the shell's
+    // shared status line can show the move/technique without every module
+    // reimplementing that UI.
+    onHint(message) {
+      showHintStatus(message);
+    },
+
     cursorMove,
     bindPointer,
+    cellAt,
   };
 }
 
@@ -325,6 +353,23 @@ function reportBridgeError(err) {
   // Surfaced softly (a live-region info line) rather than yanking the
   // player out of the game they're mid-puzzle on.
   showEngineInfo(`Engine error: ${err && err.message ? err.message : err}`);
+}
+
+// ---------- hint status line ----------
+
+function showHintStatus(message) {
+  el.hintStatus.hidden = false;
+  el.hintStatus.textContent = message;
+}
+
+function clearHintStatus() {
+  el.hintStatus.hidden = true;
+  el.hintStatus.textContent = "";
+}
+
+async function requestHint() {
+  if (!session || !session.instance || typeof session.instance.hint !== "function") return;
+  await session.instance.hint();
 }
 
 // ---------- timer ----------
@@ -389,6 +434,40 @@ function cursorMove(event) {
   const key = event.key.length === 1 ? event.key.toLowerCase() : event.key;
   const delta = MOVE_KEYS[key];
   return delta ? { ...delta } : null;
+}
+
+// cellAt resolves ANY point (in viewport/client coordinates, e.g. a
+// PointerEvent's clientX/clientY) to the nearest {row, col} inside a
+// `rows` x `cols` CSS-grid element -- pure position math
+// (getBoundingClientRect + floor division), never DOM hit-testing
+// (elementFromPoint/event.target). This is what makes every point inside
+// (or even just outside, e.g. a fast drag that briefly overshoots) the
+// grid's bounds resolve to *some* cell: there is no gap a tap can land in
+// and get silently swallowed -- not on a cell border, not in a gutter
+// track some games render between cells (Tango's edge-marker gutters), not
+// on the 1fr-rounding sub-pixel seams CSS Grid can leave between tracks.
+// Points outside [0,1] on either axis clamp to the nearest edge cell
+// rather than resolving to nothing.
+//
+// Any game whose defining pointer interaction is grid-level (Queens'
+// drag-to-paint, Zip/Patches' drag-to-draw) should resolve every
+// pointerdown/pointermove hit through this instead of
+// elementFromPoint/event.target.closest(...).
+function cellAt(gridEl, rows, cols, clientX, clientY) {
+  const rect = gridEl.getBoundingClientRect();
+  if (rect.width <= 0 || rect.height <= 0) return { row: 0, col: 0 };
+  let fx = (clientX - rect.left) / rect.width;
+  let fy = (clientY - rect.top) / rect.height;
+  fx = Math.min(Math.max(fx, 0), 0.999999);
+  fy = Math.min(Math.max(fy, 0), 0.999999);
+  return {
+    row: clamp(Math.floor(fy * rows), 0, rows - 1),
+    col: clamp(Math.floor(fx * cols), 0, cols - 1),
+  };
+}
+
+function clamp(v, lo, hi) {
+  return Math.max(lo, Math.min(hi, v));
 }
 
 const LONG_PRESS_MS = 500;

@@ -144,3 +144,151 @@ func (a patchesAdapter) solved(puzzleJSON, boardJSON []byte) (bool, error) {
 	}
 	return patches.NewValidator(p).Solved(b), nil
 }
+
+// rectApply is the Apply payload shape for Patches hints: the bounding box
+// (inclusive on both ends, exactly like patches.Rect) of one solution
+// rectangle to reveal. The UI clears any rectangle currently overlapping
+// these cells in full, then plants a fresh label across the whole box —
+// mirroring internal/tui/boards/patches.go's applyHintRect.
+type rectApply struct {
+	R0 int `json:"r0"`
+	C0 int `json:"c0"`
+	R1 int `json:"r1"`
+	C1 int `json:"c1"`
+}
+
+// patchesHintRect is a solution rectangle's bounding box (inclusive), as
+// reconstructed from the solution's label grid (see hint below) rather than
+// patches.Solution.Rects directly — the wire "solution" JSON for Patches is
+// the label grid (patchesSolutionWire), not the solver's Rect list, per
+// api.md.
+type patchesHintRect struct {
+	r0, c0, r1, c1 int
+}
+
+// patchesClueForRectBounds returns the anchor-cell index of the one clue
+// rect (given as an inclusive bounding box) contains, per the generation
+// invariant that every solution rectangle contains exactly one clue. Mirrors
+// internal/tui/boards/patches.go's patchesClueForRect.
+func patchesClueForRectBounds(p *patches.Puzzle, rect patchesHintRect) (int, bool) {
+	for r := rect.r0; r <= rect.r1; r++ {
+		for c := rect.c0; c <= rect.c1; c++ {
+			idx := r*p.C + c
+			if _, ok := p.Clues[idx]; ok {
+				return idx, true
+			}
+		}
+	}
+	return 0, false
+}
+
+// patchesRectMatchesBoard reports whether rect is already exactly reflected
+// on the board: every one of its cells shares a single label, and that label
+// doesn't leak outside rect's bounds. Mirrors
+// internal/tui/boards/patches.go's rectMatchesBoard.
+func patchesRectMatchesBoard(b *patches.Board, cols int, rect patchesHintRect) bool {
+	label := -2
+	for r := rect.r0; r <= rect.r1; r++ {
+		for c := rect.c0; c <= rect.c1; c++ {
+			l := b.Cells[r*cols+c]
+			if label == -2 {
+				label = l
+			} else if l != label {
+				return false
+			}
+		}
+	}
+	if label < 0 {
+		return false
+	}
+	for i, l := range b.Cells {
+		if l != label {
+			continue
+		}
+		cell := engine.CellAt(i, cols)
+		if cell.Row < rect.r0 || cell.Row > rect.r1 || cell.Col < rect.c0 || cell.Col > rect.c1 {
+			return false
+		}
+	}
+	return true
+}
+
+// hint mirrors internal/tui/boards/patches.go's Hint(): walk the recorded
+// solution's rectangles (in clue-index order, for a stable/deterministic
+// reveal order) and reveal the first one not yet exactly placed on the
+// board. Solution rectangles are reconstructed from the solution's label
+// grid (bounding box of each distinct label) since that's the wire shape
+// api.md documents for Patches' "solution" — not patches.Solution.Rects
+// directly.
+func (a patchesAdapter) hint(puzzleJSON, boardJSON, solutionJSON []byte) (hintResultJSON, error) {
+	p, b, err := a.decode(puzzleJSON, boardJSON)
+	if err != nil {
+		return hintResultJSON{}, err
+	}
+	var sol patchesSolutionWire
+	if err := json.Unmarshal(solutionJSON, &sol); err != nil {
+		return hintResultJSON{}, fmt.Errorf("patches: decode solution: %w", err)
+	}
+	solFlat, ferr := flattenIntGrid(sol.Labels, p.R, p.C)
+	if ferr != nil {
+		return hintResultJSON{}, fmt.Errorf("patches: decode solution: %w", ferr)
+	}
+
+	rects := map[int]*patchesHintRect{}
+	for i, lbl := range solFlat {
+		if lbl < 0 {
+			continue
+		}
+		cell := engine.CellAt(i, p.C)
+		rect, ok := rects[lbl]
+		if !ok {
+			rects[lbl] = &patchesHintRect{r0: cell.Row, c0: cell.Col, r1: cell.Row, c1: cell.Col}
+			continue
+		}
+		if cell.Row < rect.r0 {
+			rect.r0 = cell.Row
+		}
+		if cell.Row > rect.r1 {
+			rect.r1 = cell.Row
+		}
+		if cell.Col < rect.c0 {
+			rect.c0 = cell.Col
+		}
+		if cell.Col > rect.c1 {
+			rect.c1 = cell.Col
+		}
+	}
+
+	type candidate struct {
+		clueIdx int
+		rect    patchesHintRect
+	}
+	cands := make([]candidate, 0, len(rects))
+	for _, rect := range rects {
+		clueIdx, ok := patchesClueForRectBounds(p, *rect)
+		if !ok {
+			continue
+		}
+		cands = append(cands, candidate{clueIdx: clueIdx, rect: *rect})
+	}
+	sort.Slice(cands, func(i, j int) bool { return cands[i].clueIdx < cands[j].clueIdx })
+
+	for _, cand := range cands {
+		if patchesRectMatchesBoard(b, p.C, cand.rect) {
+			continue
+		}
+		rect := cand.rect
+		cellsHi := make([]cellJSON, 0, (rect.r1-rect.r0+1)*(rect.c1-rect.c0+1))
+		for r := rect.r0; r <= rect.r1; r++ {
+			for c := rect.c0; c <= rect.c1; c++ {
+				cellsHi = append(cellsHi, cellJSON{Row: r, Col: c})
+			}
+		}
+		return hintResultJSON{
+			Message: fmt.Sprintf("hint: rectangle r%dc%d..r%dc%d", rect.r0+1, rect.c0+1, rect.r1+1, rect.c1+1),
+			Cells:   cellsHi,
+			Apply:   marshalApply(rectApply{R0: rect.r0, C0: rect.c0, R1: rect.r1, C1: rect.c1}),
+		}, nil
+	}
+	return hintResultJSON{Done: true, Message: "already solved"}, nil
+}

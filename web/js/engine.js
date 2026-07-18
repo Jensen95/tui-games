@@ -140,3 +140,15 @@ export async function solved(gameId, puzzle, board) {
   const result = unwrap(eng.solved(gameId, asJSONString(puzzle), asJSONString(board)));
   return Boolean(result.solved);
 }
+
+/**
+ * hint(gameId, puzzle, board, solution) -> Promise<HintResult>
+ *
+ * See web/js/api.md's hint() section for the full shape:
+ * {done, message, technique, cells, apply}. `solution` is the `solution`
+ * value generate() returned for this puzzle.
+ */
+export async function hint(gameId, puzzle, board, solution) {
+  const eng = await ready();
+  return unwrap(eng.hint(gameId, asJSONString(puzzle), asJSONString(board), asJSONString(solution)));
+}
