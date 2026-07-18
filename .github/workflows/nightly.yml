@@ -18,10 +18,8 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-      - name: Property tests with heavy seed counts
-        run: LIG_SEEDS=5000 go test -race -timeout 45m ./...
-      - name: Fuzz all targets
-        run: FUZZTIME=60s ./scripts/fuzz-all.sh
+      - name: Heavy property tests + fuzzing (make nightly)
+        run: make nightly
       - name: Build de-duplicated corpus
         run: make corpus
       - uses: actions/upload-artifact@v4

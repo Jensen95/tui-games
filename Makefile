@@ -45,9 +45,12 @@ corpus: build
 		./$(BINARY) generate --game $$g --count 25 --out corpus/$$g; \
 	done
 
-# Nightly: heavier property-test seed counts + fuzzing.
+# Nightly: heavier property-test seed counts + fuzzing. Race and non-race
+# runs are separate: race gets a moderate seed count (10-50x slowdown on the
+# generators), the full 5000-seed sweep runs without instrumentation.
 nightly:
-	LIG_SEEDS=5000 $(GO) test -race -timeout 45m ./...
+	LIG_SEEDS=500 $(GO) test -race -timeout 60m ./...
+	LIG_SEEDS=5000 $(GO) test -timeout 45m ./...
 	FUZZTIME=60s ./scripts/fuzz-all.sh
 
 clean:

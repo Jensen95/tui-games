@@ -18,6 +18,9 @@ import (
 // for a naive unbounded DFS) fails CI instead of only showing up in an
 // unread benchmark log.
 func TestGenerator_LatencyBudget(t *testing.T) {
+	if raceEnabled {
+		t.Skip("latency budget is not meaningful under the race detector (10-50x slowdown); the non-race CI job asserts it")
+	}
 	n := seedCount()
 	// Latency measurement doesn't need the full property-test seed count to
 	// be meaningful and 250+ timed generations would slow this test down for

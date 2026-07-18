@@ -32,8 +32,13 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+      # Race run uses a reduced seed count: the race detector slows the
+      # backtracking-heavy generators 10-50x, and the nightly job covers the
+      # heavy seed counts. Latency-budget tests self-skip under race.
       - name: go test -race
-        run: LIG_SEEDS=250 go test -race -coverprofile=coverage.out ./...
+        run: LIG_SEEDS=100 go test -race -timeout 25m -coverprofile=coverage.out ./...
+      - name: go test (full seeds, no race — includes latency budgets)
+        run: LIG_SEEDS=250 go test -timeout 15m ./...
       - name: Coverage summary
         run: go tool cover -func=coverage.out | tail -1
       - uses: actions/upload-artifact@v4
