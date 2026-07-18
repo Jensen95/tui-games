@@ -1,0 +1,18 @@
+# Binaries
+/lig
+/bin/
+/dist/
+
+# Test artifacts
+*.out
+coverage.html
+/testdata/fuzz/
+
+# Corpus (generated puzzles; rebuild with `make corpus`)
+/corpus/
+
+# Editor/OS noise
+.idea/
+.vscode/
+*.swp
+.DS_Store

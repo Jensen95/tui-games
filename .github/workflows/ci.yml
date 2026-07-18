@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: Lint & dependency guard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: gofmt
+        run: make fmt-check
+      - name: go vet
+        run: make vet
+      - name: depguard (engine must not import TUI/charm/os)
+        run: make depguard
+
+  test:
+    name: Test (race + coverage)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: go test -race
+        run: LIG_SEEDS=250 go test -race -coverprofile=coverage.out ./...
+      - name: Coverage summary
+        run: go tool cover -func=coverage.out | tail -1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: coverage.out
+
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: go build
+        run: go build ./...
+      - name: Headless smoke test
+        run: |
+          go build -o lig ./cmd/lig
+          ./lig games
+          # Once game engines land, generate + verify one puzzle per game.
+          for g in $(./lig games | awk '$1 != "no" {print $1}'); do
+            ./lig generate --game "$g" --count 2 --seed 7 --out /tmp/smoke
+          done
+          if ls /tmp/smoke/*.json >/dev/null 2>&1; then ./lig verify /tmp/smoke/*.json; fi

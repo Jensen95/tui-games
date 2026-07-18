@@ -1,0 +1,32 @@
+name: Nightly fuzz & corpus
+
+on:
+  schedule:
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  nightly:
+    name: Heavy property tests + fuzzing
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Property tests with heavy seed counts
+        run: LIG_SEEDS=5000 go test -race -timeout 45m ./...
+      - name: Fuzz all targets
+        run: FUZZTIME=60s ./scripts/fuzz-all.sh
+      - name: Build de-duplicated corpus
+        run: make corpus
+      - uses: actions/upload-artifact@v4
+        with:
+          name: corpus
+          path: corpus/
+          if-no-files-found: ignore
+          retention-days: 14
