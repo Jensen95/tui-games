@@ -82,10 +82,9 @@ jobs:
           git push --delete origin edge || true
           git tag -f edge "$SHA"
           git push -f origin edge
+          printf 'Rolling prerelease: master @ %s.\n\nAutomatically rebuilt on every merge to master that passes CI. For stable builds use the latest tagged release.\n' "$SHA" > notes.md
           gh release create edge \
             --prerelease \
             --title "edge ($(git rev-parse --short "$SHA"))" \
-            --notes "Rolling prerelease: master @ ${SHA}.
-
-Automatically rebuilt on every merge to master that passes CI. For stable builds use the latest tagged release." \
+            --notes-file notes.md \
             dist/*
