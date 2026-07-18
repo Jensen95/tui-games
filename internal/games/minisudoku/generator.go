@@ -22,15 +22,56 @@ import (
 // The generation invariant (Solved(solution), CountSolutions==1, LogicSolve
 // closes) is re-checked before Generate returns; on failure it retries with
 // fresh randomness from r, up to a bounded number of attempts.
+//
+// Difficulty labeling (docs/plan/docs/02-engine-and-generation.md "Difficulty
+// labeling"): the label is an OUTPUT, never a stamped-through copy of the
+// request. For the no-guess tiers (Easy/Medium/Hard) Generate confirms the
+// carved puzzle's label against LogicSolve's deepest technique (see
+// bandForTechnique in logicsolve.go) before returning. On a mismatch it
+// retries the carve — a fresh attempt draws a fresh solution grid and a
+// fresh carve order from r, so this reuses the same bounded attempt budget
+// as the uniqueness/closure retries above rather than a separate counter.
+// If no attempt lands exactly in the requested band within the budget,
+// Generate stays total: it relaxes to the closest band any attempt actually
+// achieved (ties broken by first-encountered, so behavior stays deterministic
+// per seed) instead of erroring. Expert requests skip band confirmation
+// entirely — the ladder makes no closed-form guarantee for that tier (see
+// 02-engine-and-generation.md "Solvability tiers").
 type Generator struct{}
 
 var _ engine.Generator[Puzzle, Solution] = Generator{}
 
 const maxGenerateAttempts = 50
 
+// candidate records a fully-valid (unique + logic-closed) puzzle produced
+// during Generate whose confirmed band didn't match the request, kept as a
+// possible relaxation fallback if no attempt ever matches exactly.
+type candidate struct {
+	puzzle   Puzzle
+	solution Solution
+	dist     int // |achieved band - requested band|, smaller is closer
+}
+
+// bandDistance measures how far apart two difficulty bands are on the
+// Easy<Medium<Hard ordinal scale, used to pick the "nearest achievable band"
+// fallback when Generate can't hit the requested one exactly.
+func bandDistance(a, b engine.Difficulty) int {
+	d := int(a) - int(b)
+	if d < 0 {
+		d = -d
+	}
+	return d
+}
+
 func (g Generator) Generate(diff engine.Difficulty, r *rand.Rand) (Puzzle, Solution, error) {
 	solver := Solver{}
 	validator := Validator{}
+
+	// Only the no-guess tiers get a confirmed-label guarantee; Expert (and
+	// any future search-based tier) keeps the requested label as-is.
+	confirmBand := diff == engine.Easy || diff == engine.Medium || diff == engine.Hard
+
+	var fallback *candidate
 
 	for attempt := 0; attempt < maxGenerateAttempts; attempt++ {
 		solCells := generateSolution(r)
@@ -46,10 +87,32 @@ func (g Generator) Generate(diff engine.Difficulty, r *rand.Rand) (Puzzle, Solut
 		if solver.CountSolutions(puzzle, 2) != 1 {
 			continue
 		}
-		if _, closed, _ := solver.LogicSolve(puzzle); !closed {
+		_, closed, deepest := solver.LogicSolve(puzzle)
+		if !closed {
 			continue
 		}
-		return puzzle, Solution{Cells: solCells}, nil
+
+		if !confirmBand {
+			return puzzle, Solution{Cells: solCells}, nil
+		}
+
+		achieved := bandForTechnique(deepest)
+		if achieved == diff {
+			return puzzle, Solution{Cells: solCells}, nil
+		}
+
+		// Valid puzzle, but its confirmed band misses the request: keep it as
+		// a fallback candidate (closest band wins) and retry the carve.
+		dist := bandDistance(achieved, diff)
+		if fallback == nil || dist < fallback.dist {
+			relabeled := puzzle
+			relabeled.Diff = achieved // honest label: what LogicSolve confirmed
+			fallback = &candidate{puzzle: relabeled, solution: Solution{Cells: solCells}, dist: dist}
+		}
+	}
+
+	if fallback != nil {
+		return fallback.puzzle, fallback.solution, nil
 	}
 	return Puzzle{}, Solution{}, errors.New("minisudoku: exhausted generation attempts")
 }
@@ -122,15 +185,25 @@ func fullCluePuzzle(cells []int, diff engine.Difficulty, seed int64) Puzzle {
 // harder difficulties toward fewer clues (and so, in practice, a deeper
 // technique ladder) per docs/plan/games/mini-sudoku.md "Difficulty
 // targeting". Carving still never accepts a removal that breaks uniqueness
-// or no-guess closure, so this is a target, not a guarantee.
+// or no-guess closure, so this is a target (the bias Generate's carve
+// confirms/relaxes against), not a guarantee.
+//
+// These counts were tuned empirically against bandForTechnique (see
+// logicsolve.go) rather than picked arbitrarily: on this package's 6×6
+// carver, 20/16/12 (the original values) left "Easy" landing on
+// hidden-single (Medium band) ~93% of the time. 27/16/9 below shift the
+// per-attempt hit rate toward the requested band (roughly 65% naked-single
+// at 27 clues, ~95%+ hidden-single at 16, ~60% pointing-pair at 9) while
+// Generate's bounded retry-then-relax (generator.go) covers the remainder
+// honestly instead of mislabeling.
 func targetClueCount(diff engine.Difficulty) int {
 	switch diff {
 	case engine.Easy:
-		return 20
+		return 27
 	case engine.Medium:
 		return 16
 	case engine.Hard:
-		return 12
+		return 9
 	default: // Expert (and any future tier): carve as far as possible.
 		return 9
 	}

@@ -36,6 +36,50 @@ func bumpTechnique(cur *engine.Technique, t engine.Technique) {
 	}
 }
 
+// bandForTechnique maps the deepest technique LogicSolve actually needed to a
+// no-guess difficulty band, per docs/plan/games/mini-sudoku.md "Deduction
+// ladder" ("Difficulty = deepest technique required"). This is the table
+// Generate uses to CONFIRM a puzzle's label from LogicSolve's output, per
+// docs/plan/docs/02-engine-and-generation.md "Difficulty labeling": difficulty
+// is an output, derived from the solver, never just stamped from the request.
+//
+//	Spec ladder tier                          Implemented technique(s)                Band
+//	---------------------------------------------------------------------------------------
+//	1. Naked single                           given, naked-single                     Easy
+//	2. Hidden single                          hidden-single                           Medium
+//	3. Naked/hidden pairs, pointing pairs /   naked-pair, hidden-pair, pointing-pair   Hard
+//	   box-line reduction
+//
+// SPEC DIVERGENCE (documented, not "fixed" — this maps what is actually
+// implemented): docs/plan/games/mini-sudoku.md's tier 3 groups "naked/hidden
+// pairs AND pointing pairs / box-line reduction" together, but the
+// implemented techniqueRank above ranks pointing-pair strictly deeper (4)
+// than naked/hidden pairs (3) for internal deepest-technique tracking within
+// a single solve. Since mini-sudoku only ships three no-guess bands
+// (Easy/Medium/Hard — see engine.Difficulty and 02-engine-and-generation.md
+// "Solvability tiers"), both rank-3 and rank-4 techniques collapse into Hard
+// here, matching the spec's single tier-3 grouping rather than inventing a
+// fourth band. Empirically (see generator.go carve/targetClueCount), this
+// package's carving essentially never needs naked/hidden pairs as the
+// deepest technique on a 6×6 grid — closure is reached via singles or
+// pointing-pair first — so "Hard" puzzles in practice are labeled Hard via
+// pointing-pair, not naked/hidden pairs; the mapping still lists both for
+// completeness and to stay correct if carving or the ladder changes.
+func bandForTechnique(t engine.Technique) engine.Difficulty {
+	switch t {
+	case TechniqueGiven, TechniqueNakedSingle:
+		return engine.Easy
+	case TechniqueHiddenSingle:
+		return engine.Medium
+	case TechniqueNakedPair, TechniqueHiddenPair, TechniquePointingPair:
+		return engine.Hard
+	default:
+		// A future, deeper technique: treat as at-least-Hard rather than
+		// silently mislabeling it Easy/Medium.
+		return engine.Hard
+	}
+}
+
 // ladder holds the candidate-propagation state used by LogicSolve: the
 // current (partial) grid plus, for every still-empty cell, the bitmask of
 // digits (bit d-1 => digit d) not yet ruled out by an already-placed peer.

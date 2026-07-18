@@ -501,7 +501,70 @@ func TestCanonical_NonBoxPreservingTransformSafe(t *testing.T) {
 }
 
 // ============================================================================
-// E. Determinism — re-running with a fixed seed yields an identical puzzle,
+// E. Honest difficulty labeling — Generate's label must be CONFIRMED by
+//    LogicSolve, not just stamped from the request (docs/plan/docs/
+//    02-engine-and-generation.md "Difficulty labeling").
+// ============================================================================
+
+// TestHonestDifficulty_LabelMatchesLogicSolveBand is the core honesty
+// property over LIG_SEEDS seeds x Easy/Medium/Hard: whatever band Generate
+// stamps on the returned puzzle must be exactly the band bandForTechnique
+// derives from LogicSolve's own deepest-technique reading of that SAME
+// puzzle. This holds whether or not the puzzle's label equals what was
+// originally requested (Generate may relax to the nearest achievable band
+// per generator.go), because the whole point is that the label is an output
+// confirmed by the solver, never an unverified copy of the input.
+func TestHonestDifficulty_LabelMatchesLogicSolveBand(t *testing.T) {
+	seeds := seedCount(250)
+	g := Generator{}
+	s := Solver{}
+
+	for _, diff := range []engine.Difficulty{engine.Easy, engine.Medium, engine.Hard} {
+		for seed := int64(1); seed <= int64(seeds); seed++ {
+			r := engine.NewRand(seed)
+			puzzle, _, err := g.Generate(diff, r)
+			if err != nil {
+				t.Fatalf("seed %d diff %s: Generate failed: %v", seed, diff, err)
+			}
+
+			_, closed, deepest := s.LogicSolve(puzzle)
+			if !closed {
+				t.Fatalf("seed %d diff %s: LogicSolve did not close the returned puzzle", seed, diff)
+			}
+			wantBand := bandForTechnique(deepest)
+			if puzzle.Diff != wantBand {
+				t.Errorf("seed %d diff %s: puzzle labeled %s but LogicSolve's deepest technique %q implies band %s",
+					seed, diff, puzzle.Diff, deepest, wantBand)
+			}
+		}
+	}
+}
+
+// TestHonestDifficulty_DeterministicAcrossReruns asserts the (possibly
+// relaxed) label is itself deterministic per seed: re-running Generate with
+// an identically-seeded *rand.Rand must produce the same confirmed label,
+// not just the same givens (belt-and-suspenders over
+// TestGenerator_DeterminismSameSeed, which never inspected Diff).
+func TestHonestDifficulty_DeterministicAcrossReruns(t *testing.T) {
+	seeds := seedCount(50)
+	g := Generator{}
+
+	for _, diff := range []engine.Difficulty{engine.Easy, engine.Medium, engine.Hard} {
+		for seed := int64(1); seed <= int64(seeds); seed++ {
+			p1, _, err1 := g.Generate(diff, engine.NewRand(seed))
+			p2, _, err2 := g.Generate(diff, engine.NewRand(seed))
+			if err1 != nil || err2 != nil {
+				t.Fatalf("seed %d diff %s: Generate failed: %v / %v", seed, diff, err1, err2)
+			}
+			if p1.Diff != p2.Diff {
+				t.Errorf("seed %d diff %s: label not deterministic: %s vs %s", seed, diff, p1.Diff, p2.Diff)
+			}
+		}
+	}
+}
+
+// ============================================================================
+// F. Determinism — re-running with a fixed seed yields an identical puzzle,
 //    including the canonical fingerprint (belt-and-suspenders over the shipped
 //    determinism tests, now also checking the fingerprint).
 // ============================================================================
