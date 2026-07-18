@@ -1,0 +1,51 @@
+# GoReleaser v2 — the single build definition for both channels:
+#   release.yml  → `goreleaser release --clean` on v*.*.* tags / manual publish
+#   edge.yml     → `goreleaser release --snapshot --clean`, uploaded to the
+#                  rolling `edge` prerelease by gh
+version: 2
+
+project_name: lig
+
+builds:
+  - main: ./cmd/lig
+    binary: lig
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ignore:
+      - goos: windows
+        goarch: arm64
+
+archives:
+  - name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+
+checksum:
+  name_template: checksums.txt
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-edge+{{ .ShortCommit }}"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs"
+      - "^chore"
+      - "^test"
+
+release:
+  prerelease: auto

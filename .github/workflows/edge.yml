@@ -1,91 +1,54 @@
-# Rolling "edge" prerelease: every merge to master that passes CI rebuilds
-# the release matrix and force-updates the `edge` tag + prerelease on GitHub
-# Releases. Tagged v* releases (release.yml) are unaffected and become the
-# "latest" release when cut; edge always stays marked as a prerelease.
-name: Edge prerelease
+name: Prerelease
 
+# Publishes a rolling "edge" prerelease on every push to master, so unreleased
+# features are downloadable before a real vX.Y.Z tag is cut. The single `edge`
+# release is replaced each run; its version (see .goreleaser.yaml `snapshot`)
+# counts commits since the last tag and resets when a new release is tagged.
 on:
-  workflow_run:
-    workflows: [CI]
-    types: [completed]
-    branches: [master]
+  push:
+    branches:
+      - master
 
 permissions:
   contents: write
 
+# Never let two edge builds race to update the same release.
 concurrency:
-  group: edge-release
+  group: prerelease
   cancel-in-progress: true
 
 jobs:
-  build:
-    name: Build ${{ matrix.goos }}/${{ matrix.goarch }}
-    if: github.event.workflow_run.conclusion == 'success'
+  prerelease:
+    name: Edge prerelease
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        include:
-          - { goos: linux, goarch: amd64 }
-          - { goos: linux, goarch: arm64 }
-          - { goos: darwin, goarch: amd64 }
-          - { goos: darwin, goarch: arm64 }
-          - { goos: windows, goarch: amd64 }
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
-          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 0
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
-      - name: Build
-        env:
-          GOOS: ${{ matrix.goos }}
-          GOARCH: ${{ matrix.goarch }}
-          CGO_ENABLED: "0"
-        run: |
-          ext=""
-          [ "$GOOS" = "windows" ] && ext=".exe"
-          out="lig_edge_${GOOS}_${GOARCH}"
-          mkdir -p "dist/$out"
-          go build -trimpath -ldflags "-s -w" -o "dist/$out/lig$ext" ./cmd/lig
-          if [ "$GOOS" = "windows" ]; then
-            (cd dist && zip -r "$out.zip" "$out")
-          else
-            tar -C dist -czf "dist/$out.tar.gz" "$out"
-          fi
-          rm -r "dist/$out"
-      - uses: actions/upload-artifact@v7
+      - uses: goreleaser/goreleaser-action@v7
         with:
-          name: edge-${{ matrix.goos }}-${{ matrix.goarch }}
-          path: dist/*
+          distribution: goreleaser
+          version: "~> v2"
+          args: release --snapshot --clean
 
-  publish:
-    name: Publish rolling edge prerelease
-    needs: build
-    runs-on: ubuntu-latest
-    env:
-      GH_REPO: ${{ github.repository }}
-    steps:
-      - uses: actions/download-artifact@v8
-        with:
-          path: dist
-          merge-multiple: true
-      - name: Checksums
-        run: cd dist && sha256sum * > SHA256SUMS.txt
-      - name: Recreate edge prerelease at this commit
+      # The edge tag is created/deleted via the Releases API (--cleanup-tag /
+      # --target), never `git push`: the default token may not push refs whose
+      # history touches .github/workflows/ (needs the `workflows` permission),
+      # but API-side tag creation is exempt from that check.
+      - name: Publish rolling edge prerelease
         env:
-          GH_TOKEN: ${{ github.token }}
-          SHA: ${{ github.event.workflow_run.head_sha }}
-        # The tag is created/deleted via the Releases API (--cleanup-tag /
-        # --target), never `git push`: the default token may not push refs
-        # whose history touches .github/workflows/ (needs `workflows`
-        # permission), but API-side tag creation is exempt from that check.
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release delete edge --yes --cleanup-tag || true
-          printf 'Rolling prerelease: master @ %s.\n\nAutomatically rebuilt on every merge to master that passes CI. For stable builds use the latest tagged release.\n' "$SHA" > notes.md
+          version="$(git describe --tags --always)"
+          printf 'Rolling prerelease built from the latest `master` (`%s`).\n\nVersion `%s`. Replaced on every push to master and reset when a new `vX.Y.Z` release is tagged. **Not for production use.**\n' "$GITHUB_SHA" "$version" > notes.md
+          # Replace the previous edge release + tag so it always points at latest master.
+          gh release delete edge --cleanup-tag --yes || true
           gh release create edge \
-            --target "$SHA" \
+            --target "$GITHUB_SHA" \
             --prerelease \
-            --title "edge (${SHA:0:7})" \
+            --title "Edge build ($version)" \
             --notes-file notes.md \
-            dist/*
+            dist/*.tar.gz dist/*.zip dist/checksums.txt

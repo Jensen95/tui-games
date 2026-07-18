@@ -2,80 +2,67 @@ name: Release
 
 on:
   push:
-    tags: ["v*"]
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to tag and release, e.g. v0.0.21 (required to publish)"
+        required: false
+        type: string
+      publish:
+        description: "Publish the release (unchecked = dry run only)"
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: write
 
 jobs:
-  test:
-    name: Gate on tests
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v7
-        with:
-          go-version-file: go.mod
-      - name: Install Task
-        uses: arduino/setup-task@v3
-        with:
-          version: 3.x
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
-      - run: task lint
-      - name: Tests
-        run: task test:ci
-
-  build:
-    name: Build ${{ matrix.goos }}/${{ matrix.goarch }}
-    needs: test
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        include:
-          - { goos: linux, goarch: amd64 }
-          - { goos: linux, goarch: arm64 }
-          - { goos: darwin, goarch: amd64 }
-          - { goos: darwin, goarch: arm64 }
-          - { goos: windows, goarch: amd64 }
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v7
-        with:
-          go-version-file: go.mod
-      - name: Build
-        env:
-          GOOS: ${{ matrix.goos }}
-          GOARCH: ${{ matrix.goarch }}
-          CGO_ENABLED: "0"
-        run: |
-          ext=""
-          [ "$GOOS" = "windows" ] && ext=".exe"
-          out="lig_${GITHUB_REF_NAME}_${GOOS}_${GOARCH}"
-          mkdir -p "dist/$out"
-          go build -trimpath -ldflags "-s -w" -o "dist/$out/lig$ext" ./cmd/lig
-          if [ "$GOOS" = "windows" ]; then
-            (cd dist && zip -r "$out.zip" "$out")
-          else
-            tar -C dist -czf "dist/$out.tar.gz" "$out"
-          fi
-          rm -r "dist/$out"
-      - uses: actions/upload-artifact@v7
-        with:
-          name: dist-${{ matrix.goos }}-${{ matrix.goarch }}
-          path: dist/*
-
   release:
-    name: Publish GitHub release
-    needs: build
+    name: Release
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v8
+      - uses: actions/checkout@v7
         with:
-          path: dist
-          merge-multiple: true
-      - name: Checksums
-        run: cd dist && sha256sum * > SHA256SUMS.txt
-      - uses: softprops/action-gh-release@v2
+          fetch-depth: 0
+      - uses: actions/setup-go@v7
         with:
-          files: dist/*
-          generate_release_notes: true
+          go-version-file: go.mod
+
+      # Manual publish: validate the version and create the tag on the current
+      # commit so GoReleaser picks it up. The tag is pushed with GITHUB_TOKEN,
+      # which by design does not re-trigger the `push` event above (no double
+      # release); the real release is run inline in the GoReleaser step below.
+      - name: Create and push tag
+        if: github.event_name == 'workflow_dispatch' && inputs.publish
+        run: |
+          version="${{ inputs.version }}"
+          if [ -z "$version" ]; then
+            echo "::error::'version' is required when publishing"
+            exit 1
+          fi
+          if ! printf '%s' "$version" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+'; then
+            echo "::error::'version' must look like vX.Y.Z (got '$version')"
+            exit 1
+          fi
+          if git rev-parse -q --verify "refs/tags/$version" >/dev/null; then
+            echo "::error::tag '$version' already exists"
+            exit 1
+          fi
+          git tag "$version"
+          git push origin "$version"
+
+      # Real release on a tag push or a manual publish; otherwise a dry run
+      # (`--snapshot` builds everything locally and skips publishing).
+      - uses: goreleaser/goreleaser-action@v7
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          args: >-
+            ${{ (github.event_name == 'push' || inputs.publish)
+                && 'release --clean'
+                || 'release --snapshot --clean' }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
