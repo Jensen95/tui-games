@@ -1,25 +1,12 @@
 package main
 
-import (
-	"fmt"
+import "github.com/Jensen95/tui-games/internal/tui"
 
-	"github.com/Jensen95/tui-games/internal/engine"
-)
-
-// runTUI launches the interactive Bubble Tea app. The real shell lands in
-// Phase 2 (internal/tui); until then this reports status so the binary is
-// honest about what works.
+// runTUI launches the interactive Bubble Tea app. The shell (menu -> pick
+// game+difficulty -> generate -> play -> win) lives in internal/tui; this
+// file only wires it into the binary. It runs correctly with zero board
+// adapters registered — games without one show as "engine ready — adapter
+// coming soon" in the menu and simply can't be entered yet.
 func runTUI() error {
-	fmt.Println("lig — LinkedIn-style logic puzzles in your terminal")
-	fmt.Println()
-	if games := engine.All(); len(games) > 0 {
-		fmt.Println("engines ready:")
-		for _, e := range games {
-			fmt.Printf("  %-12s %s\n", e.ID, e.Name)
-		}
-		fmt.Println()
-	}
-	fmt.Println("The interactive TUI is under construction (Phase 2).")
-	fmt.Println("Meanwhile: `lig generate --game <id>` and `lig verify <file>` work headlessly.")
-	return nil
+	return tui.Run()
 }
