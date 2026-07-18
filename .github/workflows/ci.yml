@@ -17,12 +17,13 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-      - name: gofmt
-        run: make fmt-check
-      - name: go vet
-        run: make vet
-      - name: depguard (engine must not import TUI/charm/os)
-        run: make depguard
+      - name: Install Task
+        uses: arduino/setup-task@v2
+        with:
+          version: 3.x
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Lint (gofmt + vet + depguard)
+        run: task lint
 
   test:
     name: Test (race + coverage)
@@ -32,13 +33,16 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-      # Race run uses a reduced seed count: the race detector slows the
-      # backtracking-heavy generators 10-50x, and the nightly job covers the
-      # heavy seed counts. Latency-budget tests self-skip under race.
-      - name: go test -race
-        run: LIG_SEEDS=100 go test -race -timeout 25m -coverprofile=coverage.out ./...
-      - name: go test (full seeds, no race — includes latency budgets)
-        run: LIG_SEEDS=250 go test -timeout 15m ./...
+      - name: Install Task
+        uses: arduino/setup-task@v2
+        with:
+          version: 3.x
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      # Race run uses a reduced seed count (the race detector slows the
+      # generators 10-50x; latency-budget tests self-skip), then the
+      # full-seed uninstrumented sweep runs the latency budgets.
+      - name: Tests (task test:ci)
+        run: task test:ci
       - name: Coverage summary
         run: go tool cover -func=coverage.out | tail -1
       - uses: actions/upload-artifact@v4
@@ -54,11 +58,16 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+      - name: Install Task
+        uses: arduino/setup-task@v2
+        with:
+          version: 3.x
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
       - name: go build
         run: go build ./...
       - name: Headless smoke test
         run: |
-          go build -o lig ./cmd/lig
+          task build
           ./lig games
           # Once game engines land, generate + verify one puzzle per game.
           for g in $(./lig games | awk '$1 != "no" {print $1}'); do

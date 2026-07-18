@@ -1,0 +1,115 @@
+# https://taskfile.dev — install with:
+#   go install github.com/go-task/task/v3/cmd/task@latest
+#
+# Property-test seed count: tests default to LIG_SEEDS=250 when unset;
+# override per invocation, e.g. `LIG_SEEDS=50 task race`.
+version: "3"
+
+tasks:
+  default:
+    desc: Lint, test, build
+    cmds:
+      - task: lint
+      - task: test
+      - task: build
+
+  build:
+    desc: Build the lig binary
+    cmds:
+      - go build -o lig ./cmd/lig
+
+  run:
+    desc: Build and launch the TUI
+    deps: [build]
+    interactive: true
+    cmds:
+      - ./lig
+
+  test:
+    desc: Unit + property tests
+    cmds:
+      - go test ./...
+
+  race:
+    desc: Tests with the race detector
+    cmds:
+      - go test -race ./...
+
+  cover:
+    desc: Coverage profile + HTML report
+    cmds:
+      - go test -coverprofile=coverage.out ./...
+      - go tool cover -html=coverage.out -o coverage.html
+      - go tool cover -func=coverage.out | tail -1
+
+  test:ci:
+    desc: >-
+      What the CI test job runs: race at reduced seeds (the race detector
+      slows the generators 10-50x; latency-budget tests self-skip), then the
+      full-seed uninstrumented sweep including the latency budgets.
+    cmds:
+      - LIG_SEEDS=100 go test -race -timeout 25m -coverprofile=coverage.out ./...
+      - LIG_SEEDS=250 go test -timeout 15m ./...
+
+  vet:
+    desc: go vet
+    cmds:
+      - go vet ./...
+
+  fmt:
+    desc: Format all Go files in place
+    cmds:
+      - gofmt -w .
+
+  fmt:check:
+    desc: Fail if any file needs gofmt
+    cmds:
+      - |
+        out=$(gofmt -l .)
+        if [ -n "$out" ]; then echo "gofmt needed on:"; echo "$out"; exit 1; fi
+
+  depguard:
+    desc: Enforce the pure-engine seam (no TUI/charm/os in engine packages)
+    cmds:
+      - ./scripts/depguard.sh
+
+  lint:
+    desc: fmt:check + vet + depguard
+    cmds:
+      - task: fmt:check
+      - task: vet
+      - task: depguard
+
+  fuzz:
+    desc: Run every native fuzz target (FUZZTIME overridable, default 30s)
+    cmds:
+      - ./scripts/fuzz-all.sh
+
+  bench:
+    desc: Generator perf budgets (see docs/plan/docs/02-engine-and-generation.md)
+    cmds:
+      - go test -run '^$' -bench . -benchmem ./...
+
+  corpus:
+    desc: Build a de-duplicated puzzle corpus per game
+    deps: [build]
+    cmds:
+      - mkdir -p corpus
+      - |
+        for g in $(./lig games | awk '$1 != "no" {print $1}'); do
+          ./lig generate --game "$g" --count 25 --out "corpus/$g"
+        done
+
+  nightly:
+    desc: >-
+      Heavy property-test seeds + fuzzing (what the nightly CI job runs).
+      Race and non-race are separate runs; see test:ci for why.
+    cmds:
+      - LIG_SEEDS=500 go test -race -timeout 60m ./...
+      - LIG_SEEDS=5000 go test -timeout 45m ./...
+      - FUZZTIME=60s ./scripts/fuzz-all.sh
+
+  clean:
+    desc: Remove build/test artifacts
+    cmds:
+      - rm -f lig coverage.out coverage.html

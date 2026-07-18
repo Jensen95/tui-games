@@ -26,8 +26,12 @@ agent workflow used to build this repo.
 
 ## Build & run
 
+Dev tasks use [Task](https://taskfile.dev)
+(`go install github.com/go-task/task/v3/cmd/task@latest`).
+
 ```sh
-make build        # → ./lig
+task build        # → ./lig
+task run          # build + launch the TUI
 ./lig             # interactive TUI
 ./lig games       # list game engines
 ./lig generate --game zip --difficulty hard --count 5 --seed 42 --out puzzles/
@@ -37,11 +41,13 @@ make build        # → ./lig
 ## Development
 
 ```sh
-make lint         # gofmt + go vet + depguard (engine must not import TUI/os)
-make test         # unit + property tests (LIG_SEEDS=250 default)
-make race         # with the race detector
-make nightly      # heavy seeds + fuzzing (what the nightly CI job runs)
-make bench        # generator perf budgets (see docs/plan/docs/02-*.md)
+task lint         # gofmt + go vet + depguard (engine must not import TUI/os)
+task test         # unit + property tests (LIG_SEEDS=250 default)
+task race         # with the race detector
+task test:ci      # exactly what the CI test job runs
+task nightly      # heavy seeds + fuzzing (what the nightly CI job runs)
+task bench        # generator perf budgets (see docs/plan/docs/02-*.md)
+task --list       # everything else
 ```
 
 ### Architecture in one paragraph

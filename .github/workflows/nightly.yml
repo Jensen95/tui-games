@@ -18,10 +18,15 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-      - name: Heavy property tests + fuzzing (make nightly)
-        run: make nightly
+      - name: Install Task
+        uses: arduino/setup-task@v2
+        with:
+          version: 3.x
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Heavy property tests + fuzzing (task nightly)
+        run: task nightly
       - name: Build de-duplicated corpus
-        run: make corpus
+        run: task corpus
       - uses: actions/upload-artifact@v4
         with:
           name: corpus
