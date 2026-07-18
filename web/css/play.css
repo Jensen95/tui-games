@@ -1,0 +1,534 @@
+/*
+  TUI Minigames -- play shell + game board styles.
+  Loaded by web/play.html alongside web/css/style.css (shared tokens/buttons
+  /header/footer come from style.css; everything below is specific to the
+  play screen and the game modules under web/js/games/*.js).
+
+  NOTE for whoever next touches web/sw.js: this file (./css/play.css) is not
+  yet in that file's APP_SHELL precache list -- add it there so the play
+  page's board styling is available on a fully-offline first load.
+*/
+
+/* Queens regions / (future) Patches rectangle fills -- Okabe-Ito-based
+   categorical palette, indices 0-5, from docs/plan/docs/08-theme-style-guide.md.
+   Games with more than 6 regions fall back to a computed hue rotation (see
+   games/queens.js's regionColor()) -- documented there as an unreviewed
+   extension of this table. */
+:root {
+  --region-0: #8a6d2f;
+  --region-1: #2f6e86;
+  --region-2: #2c7a63;
+  --region-3: #2e5c86;
+  --region-4: #8a4a2e;
+  --region-5: #7a4e68;
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --region-0: #fbe3b8;
+    --region-1: #cde7f5;
+    --region-2: #c7e9da;
+    --region-3: #c9d8ec;
+    --region-4: #f3d2c0;
+    --region-5: #ebd3e2;
+  }
+}
+
+:root[data-theme="dark"] {
+  --region-0: #8a6d2f;
+  --region-1: #2f6e86;
+  --region-2: #2c7a63;
+  --region-3: #2e5c86;
+  --region-4: #8a4a2e;
+  --region-5: #7a4e68;
+}
+
+:root[data-theme="light"] {
+  --region-0: #fbe3b8;
+  --region-1: #cde7f5;
+  --region-2: #c7e9da;
+  --region-3: #c9d8ec;
+  --region-4: #f3d2c0;
+  --region-5: #ebd3e2;
+}
+
+.play-main {
+  min-height: calc(100vh - 4rem);
+}
+
+.screen {
+  padding-block: 1.5rem 3rem;
+}
+
+/* ---------- menu screen ---------- */
+
+.play-heading {
+  margin: 0 0 0.25rem;
+}
+
+.play-sub {
+  color: var(--dim);
+  margin: 0 0 1.5rem;
+}
+
+.engine-status {
+  background: var(--surface);
+  border: 1px solid var(--error);
+  color: var(--error);
+  border-radius: var(--radius);
+  padding: 0.85rem 1rem;
+  margin-bottom: 1.25rem;
+  font-size: 0.88rem;
+}
+
+.engine-status.info {
+  border-color: var(--border);
+  color: var(--dim);
+}
+
+.menu-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  margin-bottom: 1.75rem;
+}
+
+.control-group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.control-label {
+  color: var(--dim);
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-right: 0.25rem;
+}
+
+.chip {
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0.45rem 0.95rem;
+  cursor: pointer;
+}
+
+.chip:hover {
+  border-color: var(--accent);
+}
+
+.chip.active {
+  background: var(--accent);
+  color: var(--on-accent);
+  border-color: var(--accent);
+  font-weight: 700;
+}
+
+.seed-group {
+  gap: 0.6rem;
+}
+
+.seed-group label {
+  color: var(--dim);
+  font-size: 0.85rem;
+}
+
+#seed-input {
+  font-family: var(--font-mono);
+  font-size: 0.9rem;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.45rem 0.6rem;
+  width: 9rem;
+}
+
+#seed-input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.games-grid {
+  display: grid;
+  gap: 0.9rem;
+  grid-template-columns: 1fr;
+}
+
+@media (min-width: 30rem) {
+  .games-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (min-width: 56rem) {
+  .games-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+.game-pick {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1rem 1.1rem;
+  cursor: pointer;
+  font-family: var(--font-mono);
+  color: var(--text);
+}
+
+.game-pick:hover:not(:disabled),
+.game-pick:focus-visible {
+  border-color: var(--accent);
+}
+
+.game-pick:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.game-pick .glyphs {
+  color: var(--accent);
+  font-size: 0.85rem;
+  display: block;
+  margin-bottom: 0.3rem;
+}
+
+.game-pick h3 {
+  margin: 0 0 0.3rem;
+  font-size: 1.02rem;
+}
+
+.game-pick p {
+  margin: 0;
+  color: var(--dim);
+  font-size: 0.85rem;
+}
+
+/* ---------- play screen chrome ---------- */
+
+.play-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  align-items: center;
+}
+
+.play-topbar {
+  width: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.play-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.9rem;
+}
+
+#play-title {
+  font-weight: 700;
+}
+
+.pill {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0.2rem 0.65rem;
+  font-size: 0.78rem;
+  color: var(--dim);
+}
+
+.play-timer {
+  font-variant-numeric: tabular-nums;
+  font-size: 1.05rem;
+  font-weight: 700;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.3rem 0.8rem;
+}
+
+.play-actions {
+  width: 100%;
+  display: flex;
+  justify-content: center;
+  gap: 0.75rem;
+}
+
+.board-container {
+  width: 100%;
+  display: flex;
+  justify-content: center;
+}
+
+/* ---------- shared board/cell primitives (used by game modules) ---------- */
+
+.puzzle-grid {
+  display: grid;
+  background: var(--grid);
+  border: 2px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  width: min(100%, 26rem);
+  aspect-ratio: 1 / 1;
+}
+
+.cell {
+  appearance: none;
+  background: var(--surface);
+  border: none;
+  color: var(--text);
+  font-family: var(--font-mono);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  font-size: clamp(1rem, 5vw, 1.6rem);
+  padding: 0;
+  cursor: pointer;
+  touch-action: manipulation;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.cell:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+  z-index: 3;
+}
+
+.cell.given {
+  background: var(--surface-2);
+  font-weight: 700;
+  cursor: default;
+}
+
+.cell.cursor {
+  box-shadow: inset 0 0 0 3px var(--accent);
+  z-index: 2;
+}
+
+.cell.invalid {
+  background: color-mix(in srgb, var(--error) 22%, var(--surface));
+  color: var(--error);
+}
+
+.cell.given.invalid {
+  background: color-mix(in srgb, var(--error) 30%, var(--surface-2));
+}
+
+.edge-marker {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--dim);
+  font-size: 0.75rem;
+  font-weight: 700;
+  background: var(--surface);
+  pointer-events: none;
+}
+
+/* ---------- Tango ---------- */
+
+.tango-cell.sun {
+  color: var(--sun);
+}
+
+.tango-cell.moon {
+  color: var(--moon);
+}
+
+/* ---------- Queens ---------- */
+
+.queens-cell .region-tag {
+  position: absolute;
+  top: 0.15em;
+  left: 0.25em;
+  font-size: 0.4em;
+  opacity: 0.55;
+  font-weight: 700;
+  pointer-events: none;
+}
+
+.queens-cell .mark {
+  color: var(--dim);
+  font-weight: 700;
+}
+
+.queens-cell .queen {
+  color: var(--piece, var(--text));
+  font-size: 1.15em;
+}
+
+.queens-cell.region-edge-right {
+  box-shadow: inset -3px 0 0 var(--border);
+}
+
+.queens-cell.region-edge-bottom {
+  box-shadow: inset 0 -3px 0 var(--border);
+}
+
+.queens-cell.region-edge-right.region-edge-bottom {
+  box-shadow: inset -3px 0 0 var(--border), inset 0 -3px 0 var(--border);
+}
+
+.queens-cell.cursor.region-edge-right {
+  box-shadow: inset 0 0 0 3px var(--accent), inset -3px 0 0 var(--border);
+}
+
+.queens-cell.cursor.region-edge-bottom {
+  box-shadow: inset 0 0 0 3px var(--accent), inset 0 -3px 0 var(--border);
+}
+
+/* ---------- Mini Sudoku ---------- */
+
+.sudoku-cell.box-edge-right {
+  box-shadow: inset -3px 0 0 var(--border);
+}
+
+.sudoku-cell.box-edge-bottom {
+  box-shadow: inset 0 -3px 0 var(--border);
+}
+
+.sudoku-cell.box-edge-right.box-edge-bottom {
+  box-shadow: inset -3px 0 0 var(--border), inset 0 -3px 0 var(--border);
+}
+
+.sudoku-cell.cursor.box-edge-right {
+  box-shadow: inset 0 0 0 3px var(--accent), inset -3px 0 0 var(--border);
+}
+
+.sudoku-cell.cursor.box-edge-bottom {
+  box-shadow: inset 0 0 0 3px var(--accent), inset 0 -3px 0 var(--border);
+}
+
+.sudoku-notes {
+  position: absolute;
+  inset: 0.1em;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  grid-template-rows: repeat(2, 1fr);
+  pointer-events: none;
+}
+
+.sudoku-notes span {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.32em;
+  color: var(--dim);
+  font-weight: 700;
+}
+
+.board-shell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+  width: 100%;
+}
+
+.keypad {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 0.5rem;
+  width: min(100%, 26rem);
+}
+
+.keypad button {
+  font-family: var(--font-mono);
+  font-size: 1.1rem;
+  font-weight: 700;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.6rem 0;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.keypad button:hover,
+.keypad button:focus-visible {
+  border-color: var(--accent);
+}
+
+.keypad-tools {
+  display: flex;
+  gap: 0.6rem;
+  width: min(100%, 26rem);
+}
+
+.keypad-tools button {
+  flex: 1;
+}
+
+.keypad-tools button.active {
+  background: var(--accent);
+  color: var(--on-accent);
+  border-color: var(--accent);
+}
+
+/* ---------- win overlay ---------- */
+
+.win-overlay {
+  position: fixed;
+  inset: 0;
+  background: color-mix(in srgb, var(--bg) 78%, transparent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 50;
+  padding: 1.25rem;
+}
+
+/* The [hidden] attribute alone isn't enough: our own `display: flex` above
+   has equal specificity to (and therefore, as an author rule, beats) the
+   UA stylesheet's `[hidden] { display: none }`, which left this overlay
+   covering the viewport and intercepting clicks even while "hidden". */
+.win-overlay[hidden] {
+  display: none;
+}
+
+.win-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1.75rem 2rem;
+  text-align: center;
+  max-width: 22rem;
+  box-shadow: 0 20px 60px -20px rgba(0, 0, 0, 0.6);
+}
+
+.win-card h2 {
+  margin: 0 0 0.5rem;
+  color: var(--success);
+}
+
+.win-card p {
+  color: var(--dim);
+  margin: 0 0 1.25rem;
+}
+
+.win-actions {
+  display: flex;
+  gap: 0.75rem;
+  justify-content: center;
+  flex-wrap: wrap;
+}

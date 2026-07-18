@@ -1,0 +1,274 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>TUI Minigames — five logic puzzles in your terminal</title>
+  <meta
+    name="description"
+    content="Tango, Queens, Zip, Patches and Mini Sudoku — five LinkedIn-style logic puzzles, generated offline and deterministically, guaranteed uniquely solvable. Play in your terminal or right here in the browser."
+  />
+  <meta name="theme-color" content="#0a0a0b" />
+  <link rel="manifest" href="./manifest.webmanifest" />
+  <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
+  <link rel="apple-touch-icon" href="./icons/icon-192.png" />
+  <link rel="stylesheet" href="./css/style.css" />
+
+  <meta property="og:title" content="TUI Minigames" />
+  <meta
+    property="og:description"
+    content="Five logic puzzles — Tango, Queens, Zip, Patches, Mini Sudoku — in your terminal and your browser."
+  />
+  <meta property="og:type" content="website" />
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <header class="site-header">
+    <div class="wrap">
+      <a class="brand" href="./index.html">
+        <img class="brand-mark" src="./icons/icon-192.png" alt="" width="28" height="28" />
+        TUI Minigames
+      </a>
+      <nav class="site-nav" aria-label="Primary">
+        <a href="#games">Games</a>
+        <a href="#install">Install</a>
+        <a href="https://github.com/Jensen95/tui-games">GitHub</a>
+        <a class="btn btn-primary" href="./play.html">Play in browser</a>
+      </nav>
+    </div>
+  </header>
+
+  <main id="main">
+    <section class="hero">
+      <div class="wrap">
+        <div>
+          <p class="eyebrow">Offline &middot; deterministic &middot; free</p>
+          <h1>
+            TUI Minigames &mdash; five logic puzzles in your
+            terminal&hellip; and your browser<span class="cursor" aria-hidden="true">&nbsp;</span>
+          </h1>
+          <p class="lede">
+            <strong>Tango, Queens, Zip, Patches</strong> and <strong>Mini Sudoku</strong> &mdash;
+            LinkedIn-style grid-logic puzzles, generated on the fly from a Go engine that never
+            phones home. Every puzzle is machine-verified: valid, uniquely solvable, and never a
+            repeat.
+          </p>
+          <div class="hero-ctas">
+            <a class="btn btn-primary" href="./play.html">Play in browser &rarr;</a>
+            <a class="btn btn-ghost" href="#install">Install the TUI</a>
+          </div>
+          <p class="hero-meta">
+            One binary, five games. No account, no network calls, no ads.
+            <code>lig</code> runs the exact same puzzle engine in your terminal.
+          </p>
+        </div>
+
+        <div class="terminal" aria-hidden="true">
+          <div class="terminal-bar">
+            <span class="terminal-dot"></span>
+            <span class="terminal-dot"></span>
+            <span class="terminal-dot"></span>
+            <span class="terminal-title">lig &mdash; tango</span>
+          </div>
+          <div class="terminal-body">
+            <p class="prompt"><span class="path">~</span>$ <span class="cmd">lig play --game tango --seed 42</span></p>
+            <p class="board-caption">6&times;6 &middot; balance + edge rules &middot; no guessing required</p>
+            <div class="tango-board" role="img" aria-label="Sample Tango puzzle grid mixing sun and moon symbols with a few equals and cross edge constraints">
+              <div class="cell sun">&#9728;<span class="edge right">=</span></div>
+              <div class="cell">&middot;</div>
+              <div class="cell">&middot;</div>
+              <div class="cell moon">&#9789;</div>
+              <div class="cell">&middot;</div>
+              <div class="cell">&middot;</div>
+
+              <div class="cell">&middot;</div>
+              <div class="cell moon">&#9789;</div>
+              <div class="cell sun">&#9728;<span class="edge bottom">&times;</span></div>
+              <div class="cell">&middot;</div>
+              <div class="cell">&middot;</div>
+              <div class="cell">&middot;</div>
+
+              <div class="cell">&middot;</div>
+              <div class="cell">&middot;</div>
+              <div class="cell">&middot;</div>
+              <div class="cell">&middot;</div>
+              <div class="cell sun">&#9728;<span class="edge right">&times;</span></div>
+              <div class="cell moon">&#9789;</div>
+
+              <div class="cell moon">&#9789;</div>
+              <div class="cell sun">&#9728;</div>
+              <div class="cell">&middot;</div>
+              <div class="cell">&middot;</div>
+              <div class="cell">&middot;</div>
+              <div class="cell">&middot;</div>
+
+              <div class="cell">&middot;</div>
+              <div class="cell">&middot;</div>
+              <div class="cell moon">&#9789;</div>
+              <div class="cell">&middot;</div>
+              <div class="cell">&middot;</div>
+              <div class="cell sun">&#9728;</div>
+
+              <div class="cell">&middot;</div>
+              <div class="cell">&middot;</div>
+              <div class="cell">&middot;</div>
+              <div class="cell sun">&#9728;</div>
+              <div class="cell moon">&#9789;</div>
+              <div class="cell">&middot;</div>
+            </div>
+            <p class="terminal-footer-line">&#10003; valid &middot; unique solution &middot; solvable without guessing</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="features">
+      <div class="wrap">
+        <div class="section-head">
+          <span class="kicker">Why it's different</span>
+          <h2>Built like a compiler, not eyeballed like a puzzle blog</h2>
+          <p>
+            Nobody manually checks generated boards for correctness &mdash; the tests are the
+            referee. That discipline is what lets the engine run offline, instantly, forever.
+          </p>
+        </div>
+        <div class="feature-grid">
+          <article class="feature">
+            <span class="glyph" aria-hidden="true">&#9658;</span>
+            <h3>Offline, deterministic generation</h3>
+            <p>Seed in, puzzle out. No server, no network call, same seed always yields the same board.</p>
+          </article>
+          <article class="feature">
+            <span class="glyph" aria-hidden="true">&#10003;</span>
+            <h3>Guaranteed-unique solutions</h3>
+            <p>Two independently authored solvers plus a validator cross-check every board before it's ever shown.</p>
+          </article>
+          <article class="feature">
+            <span class="glyph" aria-hidden="true">&#8942;</span>
+            <h3>Keyboard + mouse</h3>
+            <p>Two-handed keyboard scheme in the TUI, full mouse hit-testing, and point-and-click in the browser.</p>
+          </article>
+          <article class="feature">
+            <span class="glyph" aria-hidden="true">&#9638;</span>
+            <h3>Five games, one engine</h3>
+            <p>Tango, Queens, Zip, Patches, Mini Sudoku &mdash; one pure Go core, compiled to WASM for the web build.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section id="games">
+      <div class="wrap">
+        <div class="section-head">
+          <span class="kicker">The lineup</span>
+          <h2>Five grid-logic puzzles</h2>
+          <p>Every board is generated fresh, verified valid, and de-duplicated before you ever see it.</p>
+        </div>
+        <div class="games-grid">
+          <article class="game-card">
+            <div class="name">
+              <span class="glyphs" aria-hidden="true">&#9728;&#9789;</span>
+              <h3>Tango</h3>
+            </div>
+            <p>Balance suns and moons on a 6&times;6 grid under equals/cross edge constraints. No three alike in a row.</p>
+          </article>
+          <article class="game-card">
+            <div class="name">
+              <span class="glyphs" aria-hidden="true">&#9819;</span>
+              <h3>Queens</h3>
+            </div>
+            <p>Place one queen per row, column, and colored region &mdash; with no two queens touching, even diagonally.</p>
+          </article>
+          <article class="game-card">
+            <div class="name">
+              <span class="glyphs" aria-hidden="true">&#9492;&#9496;</span>
+              <h3>Zip</h3>
+            </div>
+            <p>Draw a single path through every cell in numbered order, respecting walls along the way.</p>
+          </article>
+          <article class="game-card">
+            <div class="name">
+              <span class="glyphs" aria-hidden="true">&#9635;</span>
+              <h3>Patches</h3>
+            </div>
+            <p>Tile the grid with numbered rectangular regions so every clue's area matches exactly.</p>
+          </article>
+          <article class="game-card">
+            <div class="name">
+              <span class="glyphs" aria-hidden="true">&#35;</span>
+              <h3>Mini Sudoku</h3>
+            </div>
+            <p>Classic Sudoku rules distilled to a smaller, faster grid &mdash; every row, column and box, once each.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="play-band">
+      <div class="wrap">
+        <h2>Try it right now &mdash; no install</h2>
+        <p>
+          The same puzzle engine compiled to WebAssembly runs entirely in your browser tab, fully
+          offline once loaded. No account, no tracking, no server round-trips.
+        </p>
+        <a class="btn btn-primary" href="./play.html">Play in browser &rarr;</a>
+      </div>
+    </section>
+
+    <section id="install">
+      <div class="wrap">
+        <div class="section-head">
+          <span class="kicker">Prefer the terminal?</span>
+          <h2>Install the TUI</h2>
+          <p>One static binary, no runtime dependencies. Pick a channel or build from source.</p>
+        </div>
+        <div class="install-grid">
+          <div class="install-card">
+            <h3>Download a release</h3>
+            <ul>
+              <li><strong>Stable</strong> &mdash; latest tagged release, recommended for most people.</li>
+              <li><strong>Edge</strong> &mdash; rolling prerelease rebuilt from every push to <code>master</code>.</li>
+            </ul>
+            <div class="release-links">
+              <a class="btn btn-ghost" href="https://github.com/Jensen95/tui-games/releases/latest">Stable release &rarr;</a>
+              <a class="btn btn-ghost" href="https://github.com/Jensen95/tui-games/releases/tag/edge">Edge channel &rarr;</a>
+            </div>
+          </div>
+          <div class="install-card">
+            <h3>Or install with Go</h3>
+            <p>Already have a Go toolchain? Install straight from the module path:</p>
+            <pre class="code"><code><span class="comment"># requires Go 1.26+</span>
+<span class="accent">go</span> install github.com/Jensen95/tui-games/cmd/lig@latest</code></pre>
+            <p>Then launch it:</p>
+            <pre class="code"><code><span class="accent">lig</span>              <span class="comment"># interactive menu</span>
+<span class="accent">lig</span> games        <span class="comment"># list game engines</span>
+<span class="accent">lig</span> generate --game zip --difficulty hard --seed 42</code></pre>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="wrap">
+      <span>TUI Minigames &mdash; offline logic puzzles, generated deterministically.</span>
+      <a href="https://github.com/Jensen95/tui-games">github.com/Jensen95/tui-games</a>
+    </div>
+  </footer>
+
+  <script>
+    // Register the service worker for offline/installable support. play.html
+    // (owned by another agent) should perform the same registration on its
+    // own load so the app shell is cached regardless of which page a visitor
+    // lands on first — both pages point at the same ./sw.js.
+    if ("serviceWorker" in navigator) {
+      window.addEventListener("load", () => {
+        navigator.serviceWorker.register("./sw.js").catch(() => {
+          /* offline support is a progressive enhancement — ignore failures */
+        });
+      });
+    }
+  </script>
+</body>
+</html>

@@ -3,6 +3,10 @@
 /bin/
 /dist/
 
+# Web build artifacts (built at Pages deploy time; see .github/workflows/pages.yml)
+/web/lig.wasm
+/web/js/wasm_exec.js
+
 # Test artifacts
 *.out
 coverage.html

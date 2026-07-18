@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Play — TUI Minigames</title>
+  <meta
+    name="description"
+    content="Play Tango, Queens, Zip, Patches and Mini Sudoku right in your browser -- offline, deterministic, no account."
+  />
+  <meta name="theme-color" content="#0a0a0b" />
+  <link rel="manifest" href="./manifest.webmanifest" />
+  <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
+  <link rel="apple-touch-icon" href="./icons/icon-192.png" />
+  <link rel="stylesheet" href="./css/style.css" />
+  <link rel="stylesheet" href="./css/play.css" />
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <header class="site-header">
+    <div class="wrap">
+      <a class="brand" href="./index.html">
+        <img class="brand-mark" src="./icons/icon-192.png" alt="" width="28" height="28" />
+        TUI Minigames
+      </a>
+      <nav class="site-nav" aria-label="Primary">
+        <a href="./index.html">Home</a>
+        <a href="https://github.com/Jensen95/tui-games">GitHub</a>
+      </nav>
+    </div>
+  </header>
+
+  <main id="main" class="play-main">
+    <!-- ---------- Menu screen ---------- -->
+    <section id="screen-menu" class="screen">
+      <div class="wrap">
+        <h1 class="play-heading">Play in your browser</h1>
+        <p class="play-sub">
+          Pick a difficulty, a seed (or roll a random one), then a game. Every board is
+          generated on the fly by the same Go engine the terminal app uses -- offline, once
+          this page has loaded.
+        </p>
+
+        <div id="engine-status" class="engine-status" hidden></div>
+
+        <div class="menu-controls">
+          <div class="control-group" id="difficulty-group" role="radiogroup" aria-label="Difficulty">
+            <span class="control-label">Difficulty</span>
+            <button type="button" class="chip" data-difficulty="easy">Easy</button>
+            <button type="button" class="chip" data-difficulty="medium">Medium</button>
+            <button type="button" class="chip" data-difficulty="hard">Hard</button>
+            <button type="button" class="chip" data-difficulty="expert">Expert</button>
+          </div>
+          <div class="control-group seed-group">
+            <label for="seed-input">Seed</label>
+            <input id="seed-input" type="number" step="1" inputmode="numeric" />
+            <button type="button" id="reroll-btn" class="btn btn-ghost">&#127922; New seed</button>
+          </div>
+        </div>
+
+        <div id="game-list" class="games-grid" aria-live="polite">
+          <p class="play-sub">Loading the puzzle engine&hellip;</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ---------- Play screen ---------- -->
+    <section id="screen-play" class="screen" hidden>
+      <div class="wrap play-wrap">
+        <div class="play-topbar">
+          <button type="button" id="menu-btn" class="btn btn-ghost">&larr; Menu</button>
+          <div class="play-meta">
+            <span id="play-title"></span>
+            <span id="play-difficulty" class="pill"></span>
+            <span id="play-seed" class="pill"></span>
+          </div>
+          <div class="play-timer" id="play-timer" aria-live="off">00:00</div>
+        </div>
+
+        <div id="board-container" class="board-container"></div>
+
+        <div class="play-actions">
+          <button type="button" id="reset-btn" class="btn btn-ghost">New puzzle</button>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <div id="win-overlay" class="win-overlay" hidden>
+    <div class="win-card" role="alertdialog" aria-labelledby="win-title">
+      <h2 id="win-title">Solved!</h2>
+      <p id="win-time"></p>
+      <div class="win-actions">
+        <button type="button" id="win-new-btn" class="btn btn-primary">New puzzle</button>
+        <button type="button" id="win-menu-btn" class="btn btn-ghost">Menu</button>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="./js/app.js"></script>
+</body>
+</html>

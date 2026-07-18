@@ -1,0 +1,703 @@
+/*
+  TUI Minigames — landing page styles.
+  Palette sourced from docs/plan/docs/08-theme-style-guide.md (Dark/Light rows).
+  Dark is the default identity (the site should feel like the TUI); light is
+  supported for users whose OS/browser prefers it.
+  Mobile-first: base rules target small screens, min-width queries layer up.
+*/
+
+:root {
+  --bg: #0a0a0b;
+  --surface: #15161a;
+  --surface-2: #1b1d22;
+  --grid: #2a2c33;
+  --border: #33363f;
+  --text: #f2f3f5;
+  --dim: #9aa0ab;
+  --accent: #d0ff00;
+  --on-accent: #000000;
+  --sun: #ffb454;
+  --moon: #7aa2f7;
+  --success: #4caf50;
+  --warning: #ff6b35;
+  --error: #ff453a;
+
+  --font-mono: ui-monospace, "SFMono-Regular", "Cascadia Mono", "Cascadia Code",
+    "JetBrains Mono", Consolas, "Liberation Mono", Menlo, Monaco, monospace;
+
+  --radius: 10px;
+  --max-w: 72rem;
+  color-scheme: dark;
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg: #ffffff;
+    --surface: #f5f5f7;
+    --surface-2: #ececef;
+    --grid: #dcdce1;
+    --border: #c9c9ce;
+    --text: #111111;
+    --dim: #6b6b72;
+    --accent: #a435d2;
+    --on-accent: #ffffff;
+    --sun: #f5a623;
+    --moon: #5b5bd6;
+    --success: #2e7d32;
+    --warning: #c2410c;
+    --error: #d70015;
+    color-scheme: light;
+  }
+}
+
+/* Manual overrides win over the media query in both directions, for hosts
+   that stamp data-theme on <html> based on an in-page toggle. This page ships
+   no toggle itself, but stays correct if one is added later. */
+:root[data-theme="dark"] {
+  --bg: #0a0a0b;
+  --surface: #15161a;
+  --surface-2: #1b1d22;
+  --grid: #2a2c33;
+  --border: #33363f;
+  --text: #f2f3f5;
+  --dim: #9aa0ab;
+  --accent: #d0ff00;
+  --on-accent: #000000;
+  --sun: #ffb454;
+  --moon: #7aa2f7;
+  color-scheme: dark;
+}
+
+:root[data-theme="light"] {
+  --bg: #ffffff;
+  --surface: #f5f5f7;
+  --surface-2: #ececef;
+  --grid: #dcdce1;
+  --border: #c9c9ce;
+  --text: #111111;
+  --dim: #6b6b72;
+  --accent: #a435d2;
+  --on-accent: #ffffff;
+  --sun: #f5a623;
+  --moon: #5b5bd6;
+  color-scheme: light;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 16px;
+  line-height: 1.55;
+  overflow-x: hidden;
+}
+
+img {
+  max-width: 100%;
+  display: block;
+}
+
+a {
+  color: var(--accent);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+}
+
+a:focus-visible,
+button:focus-visible,
+.btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.skip-link {
+  position: absolute;
+  left: 0.5rem;
+  top: -3rem;
+  background: var(--accent);
+  color: var(--on-accent);
+  padding: 0.5rem 1rem;
+  border-radius: 6px;
+  z-index: 100;
+  transition: top 0.15s ease;
+}
+
+.skip-link:focus {
+  top: 0.5rem;
+}
+
+.wrap {
+  width: 100%;
+  max-width: var(--max-w);
+  margin-inline: auto;
+  padding-inline: 1.25rem;
+}
+
+/* ---------- header ---------- */
+
+.site-header {
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  background: color-mix(in srgb, var(--bg) 92%, transparent);
+  backdrop-filter: blur(6px);
+  z-index: 10;
+}
+
+.site-header .wrap {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding-block: 0.85rem;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  font-weight: 700;
+  color: var(--text);
+  text-decoration: none;
+  font-size: 1rem;
+  letter-spacing: 0.01em;
+}
+
+.brand-mark {
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+  flex: none;
+}
+
+.site-nav {
+  display: flex;
+  align-items: center;
+  gap: 1.1rem;
+  font-size: 0.9rem;
+}
+
+.site-nav a {
+  color: var(--dim);
+  text-decoration: none;
+}
+
+.site-nav a:hover,
+.site-nav a:focus-visible {
+  color: var(--text);
+}
+
+.site-nav .btn {
+  color: var(--on-accent);
+}
+
+/* ---------- buttons ---------- */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  font-family: var(--font-mono);
+  font-size: 0.95rem;
+  font-weight: 700;
+  text-decoration: none;
+  padding: 0.7rem 1.3rem;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  line-height: 1.2;
+}
+
+.btn-primary {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+.btn-primary:hover,
+.btn-primary:focus-visible {
+  filter: brightness(1.08);
+}
+
+.btn-ghost {
+  background: transparent;
+  color: var(--text);
+  border-color: var(--border);
+}
+
+.btn-ghost:hover,
+.btn-ghost:focus-visible {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.btn-block {
+  width: 100%;
+}
+
+/* ---------- hero ---------- */
+
+.hero {
+  padding-block: 3rem 2.5rem;
+}
+
+.hero .wrap {
+  display: grid;
+  gap: 2.25rem;
+}
+
+.eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--accent);
+  font-size: 0.8rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  margin: 0 0 0.9rem;
+}
+
+.eyebrow::before {
+  content: "";
+  width: 0.55em;
+  height: 0.55em;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent);
+}
+
+h1 {
+  font-size: clamp(1.7rem, 5vw + 0.5rem, 2.9rem);
+  line-height: 1.15;
+  margin: 0 0 1rem;
+  letter-spacing: -0.01em;
+}
+
+h1 .cursor {
+  display: inline-block;
+  width: 0.55ch;
+  background: var(--accent);
+  animation: blink 1.1s steps(1) infinite;
+  margin-left: 0.05em;
+}
+
+@keyframes blink {
+  0%,
+  49% {
+    opacity: 1;
+  }
+  50%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  h1 .cursor {
+    animation: none;
+  }
+}
+
+.lede {
+  color: var(--dim);
+  font-size: 1.05rem;
+  max-width: 46rem;
+  margin: 0 0 1.75rem;
+}
+
+.hero-ctas {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.8rem;
+  margin-bottom: 0.5rem;
+}
+
+.hero-meta {
+  color: var(--dim);
+  font-size: 0.85rem;
+  margin-top: 0.9rem;
+}
+
+.hero-meta code {
+  color: var(--text);
+}
+
+/* ---------- terminal demo ---------- */
+
+.terminal {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  box-shadow: 0 20px 60px -30px rgba(0, 0, 0, 0.6);
+  max-width: 34rem;
+}
+
+.terminal-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.55rem 0.75rem;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--border);
+}
+
+.terminal-dot {
+  width: 0.7rem;
+  height: 0.7rem;
+  border-radius: 50%;
+  background: var(--border);
+}
+
+.terminal-dot:nth-child(1) {
+  background: var(--error);
+}
+
+.terminal-dot:nth-child(2) {
+  background: var(--warning);
+}
+
+.terminal-dot:nth-child(3) {
+  background: var(--success);
+}
+
+.terminal-title {
+  margin-inline: auto;
+  color: var(--dim);
+  font-size: 0.75rem;
+}
+
+.terminal-body {
+  padding: 1.1rem 1.1rem 1.3rem;
+  font-size: 0.85rem;
+}
+
+.terminal-body .prompt {
+  color: var(--dim);
+}
+
+.terminal-body .prompt .path {
+  color: var(--moon);
+}
+
+.terminal-body .cmd {
+  color: var(--text);
+}
+
+.board-caption {
+  color: var(--dim);
+  font-size: 0.78rem;
+  margin: 0.9rem 0 0.6rem;
+}
+
+.tango-board {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 2px;
+  background: var(--grid);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+  width: min(100%, 22rem);
+  aspect-ratio: 1 / 1;
+}
+
+.tango-board .cell {
+  background: var(--surface);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: clamp(0.95rem, 4vw, 1.3rem);
+  position: relative;
+  aspect-ratio: 1 / 1;
+}
+
+.tango-board .cell.sun {
+  color: var(--sun);
+}
+
+.tango-board .cell.moon {
+  color: var(--moon);
+}
+
+.tango-board .cell .edge {
+  position: absolute;
+  color: var(--dim);
+  font-size: 0.6em;
+  background: var(--surface);
+  line-height: 1;
+}
+
+.tango-board .cell .edge.right {
+  right: -0.55em;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 2;
+}
+
+.tango-board .cell .edge.bottom {
+  bottom: -0.55em;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 2;
+}
+
+.terminal-footer-line {
+  margin-top: 1rem;
+  color: var(--success);
+  font-size: 0.78rem;
+}
+
+/* ---------- sections ---------- */
+
+section {
+  padding-block: 2.5rem;
+}
+
+.section-head {
+  max-width: 42rem;
+  margin-bottom: 1.75rem;
+}
+
+.section-head h2 {
+  font-size: clamp(1.3rem, 2.5vw + 0.6rem, 1.8rem);
+  margin: 0 0 0.5rem;
+}
+
+.section-head p {
+  color: var(--dim);
+  margin: 0;
+}
+
+.kicker {
+  display: block;
+  color: var(--accent);
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-bottom: 0.5rem;
+}
+
+/* ---------- feature grid ---------- */
+
+.feature-grid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: 1fr;
+}
+
+.feature {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1.1rem 1.2rem;
+}
+
+.feature .glyph {
+  color: var(--accent);
+  font-size: 1.1rem;
+  display: block;
+  margin-bottom: 0.5rem;
+}
+
+.feature h3 {
+  font-size: 1rem;
+  margin: 0 0 0.4rem;
+}
+
+.feature p {
+  color: var(--dim);
+  margin: 0;
+  font-size: 0.9rem;
+}
+
+/* ---------- games grid ---------- */
+
+.games-grid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: 1fr;
+}
+
+.game-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1.1rem 1.2rem;
+}
+
+.game-card .name {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  margin-bottom: 0.35rem;
+}
+
+.game-card .name .glyphs {
+  color: var(--accent);
+  font-size: 0.85rem;
+}
+
+.game-card h3 {
+  margin: 0;
+  font-size: 1.02rem;
+}
+
+.game-card p {
+  color: var(--dim);
+  margin: 0;
+  font-size: 0.88rem;
+}
+
+/* ---------- install ---------- */
+
+.install-grid {
+  display: grid;
+  gap: 1.5rem;
+  grid-template-columns: 1fr;
+}
+
+.install-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1.25rem 1.3rem;
+}
+
+.install-card h3 {
+  margin: 0 0 0.75rem;
+  font-size: 1rem;
+}
+
+.install-card ul {
+  margin: 0 0 1rem;
+  padding-left: 1.1rem;
+  color: var(--dim);
+  font-size: 0.9rem;
+}
+
+.install-card li + li {
+  margin-top: 0.4rem;
+}
+
+pre.code {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.85rem 1rem;
+  overflow-x: auto;
+  font-size: 0.82rem;
+  margin: 0 0 0.75rem;
+}
+
+pre.code:last-child {
+  margin-bottom: 0;
+}
+
+pre.code .comment {
+  color: var(--dim);
+}
+
+pre.code .accent {
+  color: var(--accent);
+}
+
+.release-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin-top: 0.75rem;
+}
+
+/* ---------- play cta band ---------- */
+
+.play-band {
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+
+.play-band .wrap {
+  padding-block: 2.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  align-items: flex-start;
+}
+
+.play-band h2 {
+  margin: 0;
+  font-size: clamp(1.2rem, 2vw + 0.6rem, 1.6rem);
+}
+
+.play-band p {
+  color: var(--dim);
+  margin: 0;
+  max-width: 38rem;
+}
+
+/* ---------- footer ---------- */
+
+.site-footer {
+  border-top: 1px solid var(--border);
+  padding-block: 1.75rem;
+  color: var(--dim);
+  font-size: 0.82rem;
+}
+
+.site-footer .wrap {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1.5rem;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.site-footer a {
+  color: var(--dim);
+}
+
+.site-footer a:hover,
+.site-footer a:focus-visible {
+  color: var(--text);
+}
+
+/* ---------- layout: tablet+ ---------- */
+
+@media (min-width: 46rem) {
+  .hero .wrap {
+    grid-template-columns: 1.05fr 0.95fr;
+    align-items: center;
+  }
+
+  .feature-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .games-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .install-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (min-width: 64rem) {
+  .feature-grid {
+    grid-template-columns: repeat(4, 1fr);
+  }
+
+  .games-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
