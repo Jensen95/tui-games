@@ -1,0 +1,91 @@
+# Rolling "edge" prerelease: every merge to master that passes CI rebuilds
+# the release matrix and force-updates the `edge` tag + prerelease on GitHub
+# Releases. Tagged v* releases (release.yml) are unaffected and become the
+# "latest" release when cut; edge always stays marked as a prerelease.
+name: Edge prerelease
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [master]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: edge-release
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build ${{ matrix.goos }}/${{ matrix.goarch }}
+    if: github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - { goos: linux, goarch: amd64 }
+          - { goos: linux, goarch: arm64 }
+          - { goos: darwin, goarch: amd64 }
+          - { goos: darwin, goarch: arm64 }
+          - { goos: windows, goarch: amd64 }
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Build
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+        run: |
+          ext=""
+          [ "$GOOS" = "windows" ] && ext=".exe"
+          out="lig_edge_${GOOS}_${GOARCH}"
+          mkdir -p "dist/$out"
+          go build -trimpath -ldflags "-s -w" -o "dist/$out/lig$ext" ./cmd/lig
+          if [ "$GOOS" = "windows" ]; then
+            (cd dist && zip -r "$out.zip" "$out")
+          else
+            tar -C dist -czf "dist/$out.tar.gz" "$out"
+          fi
+          rm -r "dist/$out"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: edge-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: dist/*
+
+  publish:
+    name: Publish rolling edge prerelease
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Checksums
+        run: cd dist && sha256sum * > SHA256SUMS.txt
+      - name: Recreate edge tag + prerelease at this commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          gh release delete edge --yes || true
+          git push --delete origin edge || true
+          git tag -f edge "$SHA"
+          git push -f origin edge
+          gh release create edge \
+            --prerelease \
+            --title "edge ($(git rev-parse --short "$SHA"))" \
+            --notes "Rolling prerelease: master @ ${SHA}.
+
+Automatically rebuilt on every merge to master that passes CI. For stable builds use the latest tagged release." \
+            dist/*

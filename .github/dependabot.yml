@@ -1,0 +1,23 @@
+version: 2
+updates:
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      # The charm stack moves in lockstep (bubbletea/lipgloss/bubbles share
+      # internals) — bump it as one PR so CI sees a coherent set.
+      charm:
+        patterns:
+          - "charm.land/*"
+          - "github.com/charmbracelet/*"
+      minor-and-patch:
+        update-types: ["minor", "patch"]
+        exclude-patterns:
+          - "charm.land/*"
+          - "github.com/charmbracelet/*"
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
