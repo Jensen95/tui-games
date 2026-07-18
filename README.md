@@ -78,6 +78,11 @@ via `LIG_SEEDS` (CI: 250, nightly: 5000).
   to `master` and all PRs.
 - **Nightly** (`nightly.yml`): heavy-seed property tests, native fuzzing,
   corpus build.
-- **Release** (`release.yml`): pushing a `v*` tag builds
-  linux/darwin/windows (amd64+arm64) binaries and publishes a GitHub release
-  with checksums.
+- **Edge channel** (`edge.yml`): every push to `master` replaces the rolling
+  `edge` GitHub prerelease with a [GoReleaser](https://goreleaser.com)
+  snapshot build (linux/darwin/windows, amd64+arm64) — grab unreleased
+  features there.
+- **Release** (`release.yml`): pushing a `v*.*.*` tag (or dispatching the
+  workflow with a version + publish) runs GoReleaser and publishes the
+  stable release with binaries and checksums. Build config lives in
+  `.goreleaser.yaml`, shared by both channels.
