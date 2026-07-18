@@ -1,6 +1,10 @@
 package main
 
-import "github.com/Jensen95/tui-games/internal/tui"
+import (
+	"github.com/Jensen95/tui-games/internal/tui"
+	// Board adapters self-register into the tui adapter registry.
+	_ "github.com/Jensen95/tui-games/internal/tui/boards"
+)
 
 // runTUI launches the interactive Bubble Tea app. The shell (menu -> pick
 // game+difficulty -> generate -> play -> win) lives in internal/tui; this

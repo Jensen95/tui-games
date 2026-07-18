@@ -82,13 +82,25 @@ func mouseEventFromMsg(msg tea.MouseMsg) MouseEvent {
 	return ev
 }
 
+// boardOriginX/Y locate the adapter's View() output inside the frame that
+// gameView.View composes: the board is rendered flush-left after the
+// title/timer header line and one blank line. Adapter GridGeometry origins
+// are relative to the adapter's own view, so mouse coordinates must be
+// shifted by this frame offset before hit-testing. Keep in sync with View()
+// (pinned by TestGameView_BoardFrameOffset).
+const (
+	boardOriginX = 0
+	boardOriginY = 2
+)
+
 // handleMouse resolves a raw mouse message's coordinates to a grid cell via
-// the adapter's GridGeometry, then dispatches. It reports whether the board
+// the adapter's GridGeometry (translating from screen space into the
+// adapter's view space first), then dispatches. It reports whether the board
 // changed.
 func (g *gameView) handleMouse(msg tea.MouseMsg) bool {
 	m := msg.Mouse()
 	geo := g.adapter.GridGeometry()
-	cell := CellRefFromPoint(geo, m.X, m.Y)
+	cell := CellRefFromPoint(geo, m.X-boardOriginX, m.Y-boardOriginY)
 	return g.adapter.HandleMouse(mouseEventFromMsg(msg), cell)
 }
 
