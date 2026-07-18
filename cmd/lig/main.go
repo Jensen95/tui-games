@@ -18,6 +18,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/Jensen95/tui-games/internal/corpus"
 	"github.com/Jensen95/tui-games/internal/engine"
 	_ "github.com/Jensen95/tui-games/internal/games/all"
 )
@@ -66,7 +67,7 @@ func usage() {
   lig                    launch the TUI
   lig games              list registered games
   lig generate --game <id> [--difficulty easy|medium|hard|expert]
-               [--count N] [--seed S] [--out DIR]
+               [--count N] [--seed S] [--out DIR] [--corpus DIR]
   lig verify <file.json> [...]`)
 }
 
@@ -89,6 +90,7 @@ func runGenerate(args []string) error {
 	count := fs.Int("count", 1, "number of distinct puzzles to generate")
 	seed := fs.Int64("seed", 1, "base seed; puzzle i uses seed+i")
 	out := fs.String("out", "", "output directory (default: stdout)")
+	corpusDir := fs.String("corpus", "", "cross-run corpus directory: dedup against and record into it (default: off)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -109,7 +111,19 @@ func runGenerate(args []string) error {
 		}
 	}
 
+	var store *corpus.Store
+	if *corpusDir != "" {
+		store, err = corpus.Open(*corpusDir)
+		if err != nil {
+			return fmt.Errorf("generate: %w", err)
+		}
+		defer store.Close()
+	}
+
 	// In-batch dedup: retry with fresh seeds until count distinct fingerprints.
+	// When a corpus store is configured, also dedup and record against it, so
+	// repeated `generate` runs never emit a puzzle already amassed in the
+	// corpus (docs/plan/docs/02-engine-and-generation.md, "Deduplication").
 	seen := map[[32]byte]struct{}{}
 	produced := 0
 	for s := *seed; produced < *count; s++ {
@@ -123,7 +137,15 @@ func runGenerate(args []string) error {
 		if _, dup := seen[gen.Fingerprint]; dup {
 			continue
 		}
+		if store != nil && store.Seen(entry.ID, gen.Fingerprint) {
+			continue
+		}
 		seen[gen.Fingerprint] = struct{}{}
+		if store != nil {
+			if err := store.Add(entry.ID, gen.Fingerprint); err != nil {
+				return fmt.Errorf("generate: corpus add: %w", err)
+			}
+		}
 
 		env := puzzleFile{
 			SchemaVersion: schemaVersion,
