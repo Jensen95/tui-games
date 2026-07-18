@@ -44,9 +44,10 @@ Shared bindings (via `bubbles/key`, shown in a `bubbles/help` bar):
 
 | Key | Action |
 |---|---|
-| `↑↓←→` / `hjkl` | Move cursor |
-| `Space` / `Enter` | Primary action (cycle symbol / place / commit rectangle / extend path) |
-| game-specific | `s`/`m` (Tango), `1`–`6` (Sudoku), `x` (mark/clear), etc. |
+| `↑↓←→` / `wasd` / `hjkl` | Move cursor |
+| `Space` / `Enter` | **Primary action** (place first symbol / cycle / commit rectangle / pen toggle) |
+| `Shift+Space` | **Secondary action** (second symbol / remove / erase) — enhanced terminals; every game keeps a plain-key fallback |
+| game-specific | `1`–`6` + `Shift+1`–`6` (Sudoku digit/note), `m` (Tango moon), `x` (mark/remove), etc. |
 | `u` | Undo |
 | `Ctrl+r` | Reset puzzle |
 | `H` | Hint (reveal one forced move + which rule/technique) |
@@ -56,6 +57,33 @@ Shared bindings (via `bubbles/key`, shown in a `bubbles/help` bar):
 | `Ctrl+c` / `q` | Quit |
 
 Per-game key nuances are defined in each `games/*.md` under "TUI interaction."
+
+### The two-handed scheme (WASD + Space/Shift) — required for TUI & desktop
+
+Designed for a full-size keyboard: **left hand on `WASD`** moves the cursor,
+**right hand (or left thumb/pinky) on `Space`/`Shift`** acts. `Shift` is the
+universal *secondary* modifier: primary action on `Space`, secondary on
+`Shift+Space` (or `Shift+digit` in Sudoku). Consistent across games:
+
+| Game | Move | Primary (`Space`) | Secondary (`Shift+…`) | Legacy fallback (always works) |
+|---|---|---|---|---|
+| **Mini Sudoku** | `wasd` | `1`–`6` place digit | `Shift+1`–`6` toggle pencil **note** | `e` toggles note-entry mode; `0`/`Backspace` clears |
+| **Tango** | `wasd` | place **sun** (again = clear) | `Shift+Space` place **moon** | `Space` cycles empty→sun→moon; `m` = moon |
+| **Queens** | `wasd` | place **X** mark (again = clear) | `Shift+Space` place **queen** | `Space` cycles empty→X→queen; `x` = X |
+| **Zip** | `wasd` (draws while pen down) | toggle **pen** down/up | `Shift+Space` erase last segment | `Backspace` erase |
+| **Patches** | `wasd` (stretches active rect) | anchor corner / **commit** rect | `Shift+Space` cancel active / remove rect under cursor | `x` cancel/remove |
+
+**Terminal reality:** legacy terminal input cannot distinguish `Shift+Space`
+from `Space` (and `Shift+digit` arrives as the shifted glyph, which is
+layout-dependent). Bubble Tea v2's **progressive keyboard enhancements**
+(Kitty keyboard protocol) report real modifiers in supporting terminals
+(kitty, WezTerm, foot, Ghostty, newer Windows Terminal/iTerm2) — request them
+at program start and match on key + `Mod`. Where unsupported, the fallback
+column must provide the full feature set; the help bar should show the
+bindings that are actually active. `hjkl` and arrows remain as alternatives
+(note: `wasd`/`hjkl` letters are therefore reserved — game-specific fallback
+keys must not collide with them, which is why Tango's moon fallback is `m`,
+not `s`).
 
 ## Navigation — mouse (first-class, required)
 
