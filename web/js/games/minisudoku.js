@@ -20,6 +20,11 @@ export function create(container, api, bundle) {
   const cols = board.cols;
   const boxRows = board.boxRows;
   const boxCols = board.boxCols;
+  // The digit range is read from the board JSON (rows === cols === the
+  // puzzle's size) rather than hardcoded, per web/js/games/README.md -- a
+  // future clone with a different grid size just works.
+  const size = rows;
+  const digits = Array.from({ length: size }, (_, i) => i + 1);
 
   let cursor = { row: 0, col: 0 };
   let noteMode = false;
@@ -53,7 +58,12 @@ export function create(container, api, bundle) {
 
       const notesEl = document.createElement("div");
       notesEl.className = "sudoku-notes";
-      for (let d = 1; d <= 6; d++) {
+      // boxCols/boxRows (from the board JSON, not hardcoded) shape the
+      // pencil-mark mini-grid so it always matches the puzzle's own box
+      // geometry, even if a future clone varies it.
+      notesEl.style.gridTemplateColumns = `repeat(${boxCols}, 1fr)`;
+      notesEl.style.gridTemplateRows = `repeat(${boxRows}, 1fr)`;
+      for (const d of digits) {
         const span = document.createElement("span");
         span.dataset.digit = String(d);
         notesEl.appendChild(span);
@@ -78,13 +88,20 @@ export function create(container, api, bundle) {
   }
   shell.appendChild(grid);
 
+  // On-screen keypad: always rendered (not just on coarse-pointer/narrow
+  // viewports -- keeping it up on desktop too is simplest and harmless, per
+  // web/js/games/README.md) so the game is fully playable with no physical
+  // keyboard. Digit buttons run 1..size, read from the board above, never
+  // hardcoded.
   const keypad = document.createElement("div");
   keypad.className = "keypad";
+  keypad.style.gridTemplateColumns = `repeat(${size}, 1fr)`;
   const digitButtons = [];
-  for (let d = 1; d <= 6; d++) {
+  for (const d of digits) {
     const btn = document.createElement("button");
     btn.type = "button";
     btn.textContent = String(d);
+    btn.setAttribute("aria-label", `Enter ${d}`);
     btn.addEventListener("click", (ev) => {
       applyDigit(cursor.row, cursor.col, d, noteMode || ev.shiftKey);
     });
@@ -98,13 +115,15 @@ export function create(container, api, bundle) {
   const noteBtn = document.createElement("button");
   noteBtn.type = "button";
   noteBtn.textContent = "✏ Notes";
+  noteBtn.setAttribute("aria-pressed", "false");
   noteBtn.addEventListener("click", () => {
     noteMode = !noteMode;
     noteBtn.classList.toggle("active", noteMode);
+    noteBtn.setAttribute("aria-pressed", String(noteMode));
   });
   const clearBtn = document.createElement("button");
   clearBtn.type = "button";
-  clearBtn.textContent = "Clear";
+  clearBtn.textContent = "Erase";
   clearBtn.addEventListener("click", () => clearCell(cursor.row, cursor.col));
   tools.appendChild(noteBtn);
   tools.appendChild(clearBtn);
@@ -188,10 +207,13 @@ export function create(container, api, bundle) {
       return true;
     }
 
-    if (event.key >= "1" && event.key <= "6") {
-      event.preventDefault();
-      applyDigit(cursor.row, cursor.col, Number(event.key), noteMode || event.shiftKey);
-      return true;
+    if (event.key >= "1" && event.key <= "9") {
+      const d = Number(event.key);
+      if (d <= size) {
+        event.preventDefault();
+        applyDigit(cursor.row, cursor.col, d, noteMode || event.shiftKey);
+        return true;
+      }
     }
 
     if (event.key === "0" || event.key === "Backspace") {
@@ -204,6 +226,7 @@ export function create(container, api, bundle) {
       event.preventDefault();
       noteMode = !noteMode;
       noteBtn.classList.toggle("active", noteMode);
+      noteBtn.setAttribute("aria-pressed", String(noteMode));
       return true;
     }
 

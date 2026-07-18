@@ -49,11 +49,11 @@ export function create(container, api, bundle) {
         api.bindPointer(cell, {
           onPrimary: () => {
             setCursor(r, c);
-            applyPrimary(r, c);
+            applyPointerPrimary(r, c);
           },
           onSecondary: () => {
             setCursor(r, c);
-            applySecondary(r, c);
+            applyPointerSecondary(r, c);
           },
         })
       );
@@ -105,16 +105,42 @@ export function create(container, api, bundle) {
     render();
   }
 
-  function applyPrimary(r, c) {
+  // Keyboard primary/secondary: exactly the two-handed scheme from
+  // web/js/api.md -- Space toggles sun, Shift+Space (or the `m` fallback)
+  // toggles moon. Kept byte-for-byte the same as before so physical-keyboard
+  // play never regresses.
+  function applySunToggle(r, c) {
     if (board.givens[r][c]) return;
     board.cells[r][c] = board.cells[r][c] === 1 ? 0 : 1;
     render();
     runChecks();
   }
 
-  function applySecondary(r, c) {
+  function applyMoonToggle(r, c) {
     if (board.givens[r][c]) return;
     board.cells[r][c] = board.cells[r][c] === 2 ? 0 : 2;
+    render();
+    runChecks();
+  }
+
+  // Pointer (mouse + touch) interaction intentionally departs from the
+  // keyboard's primary/secondary split: a touch user has no Shift key, so
+  // the original "tap = sun, shift/long-press/right-click = moon" mapping
+  // left moon completely unreachable by touch (the reported bug). Mirroring
+  // LinkedIn's mobile Tango, a tap/click now cycles empty -> sun -> moon ->
+  // empty; long-press/right-click/shift-click (api.bindPointer's
+  // "secondary" trigger) clears the cell outright instead of placing moon.
+  function applyPointerPrimary(r, c) {
+    if (board.givens[r][c]) return;
+    const v = board.cells[r][c];
+    board.cells[r][c] = v === 0 ? 1 : v === 1 ? 2 : 0;
+    render();
+    runChecks();
+  }
+
+  function applyPointerSecondary(r, c) {
+    if (board.givens[r][c]) return;
+    board.cells[r][c] = 0;
     render();
     runChecks();
   }
@@ -162,14 +188,14 @@ export function create(container, api, bundle) {
 
     if (event.code === "Space" || event.key === " ") {
       event.preventDefault();
-      if (event.shiftKey) applySecondary(cursor.row, cursor.col);
-      else applyPrimary(cursor.row, cursor.col);
+      if (event.shiftKey) applyMoonToggle(cursor.row, cursor.col);
+      else applySunToggle(cursor.row, cursor.col);
       return true;
     }
 
     if (event.key === "m" || event.key === "M") {
       event.preventDefault();
-      applySecondary(cursor.row, cursor.col);
+      applyMoonToggle(cursor.row, cursor.col);
       return true;
     }
 

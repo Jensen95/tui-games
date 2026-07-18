@@ -15,6 +15,15 @@
 // is wired with a hand-rolled pointerdown/move/up state machine rather
 // than api.bindPointer (that helper is for "tap a single cell" games).
 //
+// Touch-friendly alternative to dragging: a plain tap-and-release with no
+// movement anchors a rectangle without committing it (a 1-cell dashed
+// preview stays visible); a second, separate tap elsewhere names the
+// opposite corner and commits (or, tapping the same anchor cell again,
+// confirms a 1x1 rectangle). Tapping a covered cell while a two-tap
+// rectangle is pending abandons the pending anchor and removes that
+// rectangle instead. Dragging remains the primary gesture and always
+// commits immediately on release.
+//
 // `labels` values are opaque per api.md -- any integer not currently used
 // by another rectangle works, so this module hands out a simple ever-
 // incrementing counter.
@@ -104,7 +113,13 @@ export function create(container, api, bundle) {
   let cursor = { row: 0, col: 0 };
   let anchor = null; // {row, col} once a rectangle is being defined
   let dragCurrent = null; // {row, col}, the free corner while defining
-  let dragging = false;
+  let dragging = false; // true only while the pointer is physically down
+  // Two-tap rectangle mode (a touch-friendly alternative to drag): a plain
+  // tap-and-release with no movement anchors a rectangle without
+  // committing it; `awaitingSecondTap` is true while we're waiting for a
+  // second, separate tap to name the opposite corner (or re-tap the same
+  // cell to confirm a 1x1). See onPointerDown/onPointerUp below.
+  let awaitingSecondTap = false;
   let labelCounter = 0; // next fresh label id to hand out on commit
 
   container.innerHTML = "";
@@ -243,6 +258,7 @@ export function create(container, api, bundle) {
     }
     anchor = null;
     dragCurrent = null;
+    awaitingSecondTap = false;
     render();
     runChecks();
   }
@@ -250,6 +266,7 @@ export function create(container, api, bundle) {
   function cancelAnchor() {
     anchor = null;
     dragCurrent = null;
+    awaitingSecondTap = false;
     render();
   }
 
@@ -266,6 +283,28 @@ export function create(container, api, bundle) {
     if (!cellEl) return;
     const row = Number(cellEl.dataset.row);
     const col = Number(cellEl.dataset.col);
+
+    if (awaitingSecondTap) {
+      // Completing (or redirecting) a two-tap rectangle: this pointerdown
+      // is the second, separate tap naming the opposite corner (or re-
+      // tapping the anchor cell itself to confirm a 1x1 rectangle).
+      ev.preventDefault();
+      const label = board.labels[row][col];
+      if (label !== -1 && !(row === anchor.row && col === anchor.col)) {
+        // Second tap landed on an already-placed rectangle instead --
+        // abandon the pending anchor and let the normal "tap a placed
+        // rectangle to remove" behavior run.
+        cancelAnchor();
+        removeRectangle(label);
+        return;
+      }
+      cursor = { row, col };
+      dragCurrent = { row, col };
+      awaitingSecondTap = false;
+      tryCommit();
+      return;
+    }
+
     cursor = { row, col };
 
     const label = board.labels[row][col];
@@ -279,6 +318,11 @@ export function create(container, api, bundle) {
     // Any uncovered cell can start a rectangle (not just a clue cell -- see
     // this module's header comment on why the anchor isn't restricted to
     // clue cells).
+    try {
+      cellEl.setPointerCapture(ev.pointerId);
+    } catch {
+      /* not every pointer type supports capture -- harmless if it throws */
+    }
     anchor = { row, col };
     dragCurrent = { row, col };
     dragging = true;
@@ -303,7 +347,18 @@ export function create(container, api, bundle) {
     if (!dragging) return;
     dragging = false;
     detachDragListeners();
-    tryCommit();
+    const moved = anchor && dragCurrent && (dragCurrent.row !== anchor.row || dragCurrent.col !== anchor.col);
+    if (moved) {
+      tryCommit();
+    } else {
+      // A plain tap-and-release with no movement: don't commit a 1x1
+      // immediately (that made the two-tap flow below unreachable --
+      // pressing to anchor a rectangle would instantly finish it before a
+      // second tap could ever land). Leave the anchor active, showing its
+      // 1-cell preview, awaiting a second tap elsewhere to name the
+      // opposite corner. Dragging stays the primary/immediate gesture.
+      awaitingSecondTap = true;
+    }
   }
 
   function onPointerCancel() {

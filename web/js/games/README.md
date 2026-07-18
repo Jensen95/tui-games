@@ -179,15 +179,64 @@ the legacy single-key fallbacks alive for muscle-memory parity:
 | Queens | `Space` = place X (again = clear) | `Shift+Space` = place queen | `x` = X |
 | Mini Sudoku | `1`-`6` = place digit (again = clear) | `Shift+1`-`6` = toggle pencil note | `e` = toggle note-entry mode; `0`/`Backspace` = clear |
 
-Mouse/touch: use `api.bindPointer` for the "tap a cell" games (Tango,
-Queens landed here too even though its *keyboard* primary is X and
-secondary is queen -- tap = primary = X, long-press/right-click/shift-click
-= secondary = queen, exactly mirroring the keyboard mapping). Mini Sudoku's
-primary action is inherently digit-based (there's no single "the" primary
-symbol to tap-cycle), so its cell tap only moves the cursor/selection --
-render an on-screen 1-6 keypad (plus a Notes toggle and a Clear button) so
-the game is fully playable with no physical keyboard, per the "must be
-fully playable on a phone" requirement.
+Mouse/touch: the pointer (mouse *and* touch) interaction is **not** always a
+literal mirror of the keyboard's primary/secondary split -- a touch user has
+no Shift key and no reliable right-click, so a couple of games depart from
+the keyboard mapping on purpose to keep every action reachable by tap alone:
+
+- **Tango:** `api.bindPointer` per cell, but its `onPrimary`/`onSecondary`
+  callbacks do *not* mirror Space/Shift+Space. Tap/click **cycles**
+  `empty -> sun -> moon -> empty` (LinkedIn's mobile model) -- this is what
+  makes "moon" reachable with a single tap, where the old
+  tap=sun/shift-or-long-press=moon split left moon unreachable by touch.
+  Long-press (~500ms)/right-click/shift-click (`onSecondary`) clears the
+  cell outright instead of placing moon. The keyboard mapping (Space toggles
+  sun, Shift+Space toggles moon, `m` fallback) is unchanged.
+- **Queens:** also departs from a literal primary/secondary mirror. Tap
+  cycles `empty -> X -> queen -> empty`; long-press/right-click/shift-click
+  clears the cell (mark + queen) outright. Queens' *defining* mouse/touch
+  interaction is a drag, though (see `03-tui-design.md`: "click-drag paints
+  X marks, mirrors LinkedIn"), so it does **not** use `api.bindPointer` --
+  like Zip/Patches below, it wires its own pointerdown/move/up state machine
+  on the grid: pressing and dragging paints an X mark on every non-given,
+  non-queen cell the pointer crosses (a tap that never leaves its starting
+  cell falls through to the tap-cycle above instead of painting). The
+  keyboard mapping (Space toggles X, Shift+Space toggles queen, `x`
+  fallback) is unchanged.
+- **Mini Sudoku:** primary action is inherently digit-based (there's no
+  single "the" primary symbol to tap-cycle), so its cell tap only moves the
+  cursor/selection -- render an on-screen `1..N` keypad (`N` read from the
+  board JSON's `rows`/`cols`, never hardcoded, so a differently-sized clone
+  keeps working) plus a Notes toggle (reflect its state visually, e.g. an
+  `.active` class/`aria-pressed`) and an Erase button, so the game is fully
+  playable with no physical keyboard, per the "must be fully playable on a
+  phone" requirement. Keep the keypad visible at least whenever
+  `matchMedia("(pointer: coarse)")` matches or the viewport is narrow; it's
+  fine (and simplest) to leave it visible on desktop too.
+- **Zip:** the defining interaction is a drag from the path's current end
+  (see below), wired as a hand-rolled pointerdown/move/up state machine, not
+  `api.bindPointer`. A tap is just the degenerate case of that same state
+  machine (a pointerdown/up with no intervening move): tapping a cell
+  orthogonally adjacent to the path's head extends the path to it; tapping
+  a cell already on the path truncates the path back to (and including)
+  that cell -- tapping the second-to-last cell is therefore how a tap
+  retracts one step.
+- **Patches:** the defining interaction is a drag from an uncovered cell to
+  the opposite corner (see below), which always commits immediately on
+  release and remains the primary gesture. As a touch-friendly alternative,
+  a plain tap-and-release with **no** movement anchors a rectangle without
+  committing it (its 1-cell preview stays on screen); a second, separate tap
+  elsewhere names the opposite corner and commits, or re-tapping the same
+  anchor cell confirms a 1x1 rectangle. Tapping a placed rectangle removes
+  it -- this takes priority even while a two-tap rectangle is pending (the
+  pending anchor is simply abandoned).
+
+Any pointer state machine that isn't `api.bindPointer` (Queens/Zip/Patches
+above) must still play nicely with touch: set CSS `touch-action: none` on
+the drag surface **only** (not the whole page -- everywhere else must keep
+scrolling normally), and prefer `Element.setPointerCapture(event.pointerId)`
+on `pointerdown` so drags stay tracked reliably even once the finger drifts
+off the element that started them.
 
 ## Never re-derive win/violations yourself
 

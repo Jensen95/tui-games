@@ -197,6 +197,11 @@ export function create(container, api, bundle) {
     if (!cellEl) return;
     const row = Number(cellEl.dataset.row);
     const col = Number(cellEl.dataset.col);
+    try {
+      cellEl.setPointerCapture(ev.pointerId);
+    } catch {
+      /* not every pointer type supports capture -- harmless if it throws */
+    }
 
     if (path.length === 0) {
       pushCell(row, col);
