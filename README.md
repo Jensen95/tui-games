@@ -14,10 +14,13 @@ agent workflow used to build this repo.
 
 - [x] **Phase 0 — Foundations**: engine contracts frozen, registry, grid +
       dihedral helpers, headless CLI, CI/depguard/release pipelines.
-- [ ] **Phase 1 — Game engines** (parallel, TDD): validator → solvers ×2 →
-      generator → fingerprint, per game.
-- [ ] **Phase 2 — TUI**: Bubble Tea v2 shell + per-game board adapters,
-      keyboard + mouse.
+- [x] **Phase 1 — Game engines** (parallel, TDD): validator → solvers ×2 →
+      generator → fingerprint, per game. All five engines generate, verify,
+      and dedup headlessly (M1).
+- [x] **Phase 2 — TUI**: Bubble Tea v2 shell + per-game board adapters,
+      keyboard + mouse. Two-handed scheme: `wasd` moves, `Space` primary,
+      `Shift+Space`/`Shift+digit` secondary (Kitty-protocol terminals),
+      with plain-key fallbacks everywhere (M2).
 - [ ] **Phase 3 — Integration**: corpus dedup, difficulty tuning, perf, polish.
 - [ ] **Phase 4 — Android** (future): reuse the pure engine behind a Compose UI.
 
