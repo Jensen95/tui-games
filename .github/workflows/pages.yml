@@ -1,0 +1,47 @@
+# Deploys the PWA (landing page + browser build of the games) to GitHub
+# Pages on every push to master. The Go engine is compiled to WebAssembly at
+# deploy time; wasm_exec.js ships with the Go toolchain.
+name: Deploy Pages
+
+on:
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    name: Build wasm + deploy site
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: Build engine for WebAssembly
+        env:
+          GOOS: js
+          GOARCH: wasm
+        run: |
+          go build -trimpath -ldflags "-s -w" -o web/lig.wasm ./web/wasm
+          cp "$(go env GOROOT)/lib/wasm/wasm_exec.js" web/js/wasm_exec.js
+      - uses: actions/configure-pages@v5
+        with:
+          enablement: true
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: web
+      - id: deployment
+        uses: actions/deploy-pages@v4

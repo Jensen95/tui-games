@@ -1,88 +1,122 @@
-# tui-games — LinkedIn-style logic puzzles in your terminal
+# TUI Minigames
 
-One Go binary, five grid-logic puzzles — **Tango, Queens, Zip, Patches, Mini
-Sudoku** — playable with keyboard and mouse on the Charm [Bubble Tea
-v2](https://charm.land) stack. Every puzzle is generated on the fly, offline
-and deterministically (seed in → puzzle out), and is machine-verified to be
-valid, **uniquely solvable**, and de-duplicated before you ever see it.
+[![CI](https://github.com/Jensen95/tui-games/actions/workflows/ci.yml/badge.svg)](https://github.com/Jensen95/tui-games/actions/workflows/ci.yml)
+[![Nightly](https://github.com/Jensen95/tui-games/actions/workflows/nightly.yml/badge.svg)](https://github.com/Jensen95/tui-games/actions/workflows/nightly.yml)
+[![Release](https://img.shields.io/github/v/release/Jensen95/tui-games?include_prereleases&label=release)](https://github.com/Jensen95/tui-games/releases)
 
-The full build-ready plan lives in [`docs/plan/`](docs/plan/README.md) —
-architecture, engine contracts, per-game specs, testing strategy, and the
-agent workflow used to build this repo.
+Five LinkedIn-style logic puzzles in your terminal — **Tango, Queens, Zip,
+Patches, and Mini Sudoku** — one Go binary, keyboard + mouse, built on
+[Bubble Tea v2](https://charm.land). Every puzzle is generated on the fly,
+offline and deterministically (seed in → puzzle out), and machine-verified to
+be valid, **uniquely solvable**, and never a repeat.
 
-## Status
+<p align="center">
+  <img src="docs/assets/tango.svg" alt="Tango running in the terminal" width="640">
+</p>
 
-- [x] **Phase 0 — Foundations**: engine contracts frozen, registry, grid +
-      dihedral helpers, headless CLI, CI/depguard/release pipelines.
-- [x] **Phase 1 — Game engines** (parallel, TDD): validator → solvers ×2 →
-      generator → fingerprint, per game. All five engines generate, verify,
-      and dedup headlessly (M1).
-- [x] **Phase 2 — TUI**: Bubble Tea v2 shell + per-game board adapters,
-      keyboard + mouse. Two-handed scheme: `wasd` moves, `Space` primary,
-      `Shift+Space`/`Shift+digit` secondary (Kitty-protocol terminals),
-      with plain-key fallbacks everywhere (M2).
-- [ ] **Phase 3 — Integration**: corpus dedup, difficulty tuning, perf, polish.
-- [ ] **Phase 4 — Android** (future): reuse the pure engine behind a Compose UI.
+🎮 **[Play in your browser](https://jensen95.github.io/tui-games/)** — the same
+Go engine, compiled to WebAssembly, as an installable PWA.
 
-## Build & run
+## The games
 
-Dev tasks use [Task](https://taskfile.dev)
-(`go install github.com/go-task/task/v3/cmd/task@latest`).
+| Game | Grid | Goal |
+|---|---|---|
+| **Tango** | 6×6 | Balance suns and moons — no three in a row, honor `=`/`×` edges |
+| **Queens** | N×N | One queen per row, column, and color region; queens never touch |
+| **Zip** | 6×6+ | Draw one path through every cell, hitting the numbers in order |
+| **Patches** | 5×5+ | Tile the grid with rectangles matching each clue's area and shape |
+| **Mini Sudoku** | 6×6 | Classic Sudoku with digits 1–6 and 2×3 boxes |
+
+Each game ships at ≥4 difficulties. Easy/Medium/Hard are guaranteed solvable
+by pure logic (no guessing); Expert only guarantees a unique solution.
+
+## Install
 
 ```sh
-task build        # → ./lig
-task run          # build + launch the TUI
-./lig             # interactive TUI
-./lig games       # list game engines
-./lig generate --game zip --difficulty hard --count 5 --seed 42 --out puzzles/
-./lig verify puzzles/*.json
+# stable
+go install github.com/Jensen95/tui-games/cmd/lig@latest
+# ...or grab a binary: linux / macOS / windows, amd64 + arm64
+```
+
+- **Stable:** [latest release](https://github.com/Jensen95/tui-games/releases/latest)
+- **Edge:** [rolling prerelease](https://github.com/Jensen95/tui-games/releases/tag/edge),
+  rebuilt on every push to `master`
+
+## Play
+
+```sh
+lig
+```
+
+Two-handed scheme — left hand moves, right hand acts:
+
+| Key | Action |
+|---|---|
+| `wasd` / arrows / `hjkl` | Move cursor |
+| `Space` | Primary action (sun / X / pen / anchor) |
+| `Shift+Space` | Secondary action (moon / queen / erase / remove)* |
+| `1`–`6`, `Shift+1`–`6` | Sudoku: place digit / toggle pencil note* |
+| `u` · `Ctrl+r` · `H` | Undo · reset · hint (names the technique) |
+| `n` · `?` · `Esc` · `q` | New puzzle · help · menu · quit |
+
+\* Modifier keys need a terminal with the Kitty keyboard protocol (kitty,
+WezTerm, Ghostty, foot, recent Windows Terminal/iTerm2). Everywhere else the
+plain-key fallbacks shown in the in-game help do the same job. The mouse works
+everywhere: click, drag to draw Zip paths / stretch Patches rectangles / paint
+Queens marks, right-click to clear.
+
+## Headless CLI
+
+The same engine drives a TUI-free path, used by CI fuzzing and corpus builds:
+
+```sh
+lig games                                                   # list engines
+lig generate --game zip --difficulty hard --count 5 --seed 42 --out puzzles/
+lig verify puzzles/*.json                                   # re-check: valid + unique
+lig generate --game tango --count 100 --corpus corpus/      # cross-run dedup
 ```
 
 ## Development
 
+Dev workflows run on [Task](https://taskfile.dev)
+(`go install github.com/go-task/task/v3/cmd/task@latest`):
+
 ```sh
-task lint         # gofmt + go vet + depguard (engine must not import TUI/os)
-task test         # unit + property tests (LIG_SEEDS=250 default)
-task race         # with the race detector
-task test:ci      # exactly what the CI test job runs
-task nightly      # heavy seeds + fuzzing (what the nightly CI job runs)
-task bench        # generator perf budgets (see docs/plan/docs/02-*.md)
-task --list       # everything else
+task              # lint + test + build
+task run          # build and launch the TUI
+task test:ci      # exactly what CI runs (race + full-seed suites)
+task --list       # everything else (cover, fuzz, bench, corpus, nightly...)
 ```
 
-### Architecture in one paragraph
+### Architecture
 
 `internal/engine` holds the frozen game-agnostic contracts (Validator, Solver,
 Generator, Fingerprinter, registry) and is **pure Go** — no TUI, no I/O, no
-`os`, enforced by `scripts/depguard.sh` in CI. Each game lives in
-`internal/games/<name>` and implements those contracts; `internal/games/all`
-registers them. `internal/tui` (Bubble Tea v2) and the headless
-`lig generate`/`lig verify` CLI are two thin consumers of the same engine —
-which is also the seam that later makes an Android port a UI project instead of
-a rewrite. Details: [`docs/plan/docs/01-architecture.md`](docs/plan/docs/01-architecture.md).
+`os`, enforced by `scripts/depguard.sh` in CI. Each game implements those
+contracts in `internal/games/<name>`; the Bubble Tea TUI (`internal/tui`), the
+headless CLI, and the WebAssembly build of the web app are all thin consumers
+of the same engine. That seam is also what keeps a future Android port a
+UI project instead of a rewrite.
 
-### Testing philosophy
-
-Nobody eyeballs generated puzzles, so tests are the referee: validator truth
-tables (including near-misses that must **not** trigger), two independently
-authored solvers that must agree, property tests over many seeds asserting the
+Correctness is enforced by construction: every game has **two independently
+authored solvers** that must agree, validator truth tables covering each
+rule's near-misses, property tests over hundreds of seeds asserting the
 generation invariant (valid + exactly one solution + logic-solvable +
-deduplicated), canonicalization tests across each game's full symmetry group,
-and golden/`teatest` coverage for the TUI. Property-test seed count is tunable
-via `LIG_SEEDS` (CI: 250, nightly: 5000).
+deduplicated via symmetry-normalized fingerprints), and golden end-to-end TUI
+tests. Seed count scales via `LIG_SEEDS` (CI 250, nightly 5000).
+
+The full build plan this repo was grown from lives in
+[`docs/plan/`](docs/plan/README.md).
 
 ## CI & releases
 
-- **CI** (`.github/workflows/ci.yml`): gofmt, vet, depguard, `go test -race`
-  with coverage, build + headless generate/verify smoke test. Runs on pushes
-  to `master` and all PRs.
-- **Nightly** (`nightly.yml`): heavy-seed property tests, native fuzzing,
-  corpus build.
-- **Edge channel** (`edge.yml`): every push to `master` replaces the rolling
-  `edge` GitHub prerelease with a [GoReleaser](https://goreleaser.com)
-  snapshot build (linux/darwin/windows, amd64+arm64) — grab unreleased
-  features there.
-- **Release** (`release.yml`): pushing a `v*.*.*` tag (or dispatching the
-  workflow with a version + publish) runs GoReleaser and publishes the
-  stable release with binaries and checksums. Build config lives in
-  `.goreleaser.yaml`, shared by both channels.
+- **CI** — gofmt, vet, dependency guard, race + full-seed tests, build and a
+  headless generate/verify smoke test, on every push and PR.
+- **Nightly** — 5000-seed property runs, native fuzzing, corpus artifact.
+- **Edge** — every push to `master` republishes the
+  [`edge` prerelease](https://github.com/Jensen95/tui-games/releases/tag/edge)
+  via a GoReleaser snapshot.
+- **Releases** — push a `v*.*.*` tag (or dispatch the Release workflow with a
+  version + publish) and GoReleaser ships binaries + checksums.
+- **Web** — the PWA deploys to GitHub Pages from `web/` on every push to
+  `master`.
