@@ -152,15 +152,29 @@ func classicNonAttacking5() Board {
 
 // --- generation-invariant / canonicalization test helpers ---
 
+// raceSeedCap bounds property-batch seed counts when the race detector is
+// active. Queens generation runs the complete solver over N=9..11 boards
+// (Hard/Expert), which race instrumentation slows by ~10-50x — enough that the
+// full LIG_SEEDS batch across the property/crosscheck/canonicalization tests
+// blows the package's CI test timeout. The uninstrumented LIG_SEEDS=250 job is
+// the full-coverage pass; under race a smaller batch still exercises the
+// generator/solver enough to surface data races.
+const raceSeedCap = 25
+
 // seedCount returns the number of seeds property tests should exercise,
 // honoring LIG_SEEDS (default 250) so CI stays fast and nightly can go heavy.
+// Under the race detector the result is capped at raceSeedCap (see above).
 func seedCount() int {
+	n := 250
 	if v := os.Getenv("LIG_SEEDS"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			return n
+		if parsed, err := strconv.Atoi(v); err == nil && parsed > 0 {
+			n = parsed
 		}
 	}
-	return 250
+	if raceEnabled && n > raceSeedCap {
+		n = raceSeedCap
+	}
+	return n
 }
 
 // distinctRegionIDs returns the set of region ids appearing in region.
