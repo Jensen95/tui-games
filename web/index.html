@@ -9,6 +9,18 @@
     content="Tango, Queens, Zip, Patches and Mini Sudoku — five LinkedIn-style logic puzzles, generated offline and deterministically, guaranteed uniquely solvable. Play in your terminal or right here in the browser."
   />
   <meta name="theme-color" content="#0a0a0b" />
+  <script>
+    // Apply the saved theme before first paint so there's no flash of the
+    // wrong theme. Mirrors css/style.css's data-theme overrides; with no saved
+    // choice we set nothing and the prefers-color-scheme media query decides.
+    // js/theme.js wires the toggle and keeps everything in sync after load.
+    (function () {
+      try {
+        var t = localStorage.getItem("lig-theme");
+        if (t === "light" || t === "dark") document.documentElement.setAttribute("data-theme", t);
+      } catch (e) {}
+    })();
+  </script>
   <link rel="manifest" href="./manifest.webmanifest" />
   <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
   <link rel="apple-touch-icon" href="./icons/icon-192.png" />
@@ -35,6 +47,10 @@
         <a href="#install">Install</a>
         <a href="https://github.com/Jensen95/tui-games">GitHub</a>
         <a class="btn btn-primary" href="./play.html">Play in browser</a>
+        <button type="button" class="theme-toggle" data-theme-toggle aria-label="Switch theme">
+          <span class="theme-icon theme-icon-dark" aria-hidden="true">&#9789;</span>
+          <span class="theme-icon theme-icon-light" aria-hidden="true">&#9728;</span>
+        </button>
       </nav>
     </div>
   </header>
@@ -257,6 +273,7 @@
     </div>
   </footer>
 
+  <script src="./js/theme.js" defer></script>
   <script>
     // Register the service worker for offline/installable support. play.html
     // (owned by another agent) should perform the same registration on its

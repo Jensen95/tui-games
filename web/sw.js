@@ -15,7 +15,7 @@
 //
 // Bump CACHE_VERSION on every deploy that changes any precached file — it's
 // the only thing that busts the old cache.
-const CACHE_VERSION = "v3";
+const CACHE_VERSION = "v4";
 const CACHE_NAME = `tui-minigames-${CACHE_VERSION}`;
 
 // The app shell. play.html and its JS are owned by a different part of this
@@ -35,6 +35,7 @@ const APP_SHELL = [
   "./icons/icon-192-maskable.png",
   "./icons/icon-512-maskable.png",
   "./js/app.js",
+  "./js/theme.js",
   "./js/engine.js",
   "./js/wasm_exec.js",
   "./lig.wasm",

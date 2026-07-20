@@ -24,10 +24,29 @@ const (
 	attemptsPerN  = 6   // failed attempts before stepping N down (worst-case cap)
 )
 
+// difficultyN returns the [lo, hi] grid-size band for a difficulty. Board
+// size is Queens' difficulty lever: bigger grids mean more regions, more
+// interacting constraints, and deeper deductions, so difficulty scales N
+// monotonically across the supported 5..11 range (docs/plan/games/queens.md).
+// Before this, Generate ignored diff entirely and drew N uniformly from
+// 5..11, which left Expert no harder than Easy.
+func difficultyN(diff engine.Difficulty) (lo, hi int) {
+	switch diff {
+	case engine.Easy:
+		return 5, 6
+	case engine.Medium:
+		return 7, 8
+	case engine.Hard:
+		return 9, 10
+	default: // Expert (and any future tier): the largest boards.
+		return 10, 11
+	}
+}
+
 // Generate returns a puzzle guaranteed valid and uniquely solvable at ~diff,
-// together with its solution. All randomness (including the grid size N, which
-// the engine.Generator interface leaves to the implementation — see
-// docs/plan/games/queens.md for the supported 5..11 range) comes from r.
+// together with its solution. All randomness comes from r. The grid size N is
+// chosen from the difficulty's band (see difficultyN) — Queens' one difficulty
+// lever, since every tier is still generated fully logic-solvable.
 //
 // Strategy is solution-first per docs 02: build a full valid placement, grow
 // N connected regions each seeded by exactly one queen (which guarantees
@@ -35,7 +54,8 @@ const (
 // re-checking the complete solver after each move. The generation invariant
 // (valid, exactly one solution, logic-solvable) is enforced before returning.
 func (g *Generator) Generate(diff engine.Difficulty, r *rand.Rand) (Puzzle, Solution, error) {
-	n := minN + r.IntN(maxN-minN+1)
+	loN, hiN := difficultyN(diff)
+	n := loN + r.IntN(hiN-loN+1)
 	solver := NewSolver()
 
 	fails := 0
@@ -43,7 +63,9 @@ func (g *Generator) Generate(diff engine.Difficulty, r *rand.Rand) (Puzzle, Solu
 		// Safety valve: a few sizes have rare seeds whose reshape keeps hitting
 		// local minima. After enough failures, step N down — still fully
 		// deterministic (driven by r) — so worst-case latency stays bounded.
-		if fails >= attemptsPerN && n > minN {
+		// The floor is the difficulty's lower band bound (not the global minN),
+		// so a puzzle never drops below its requested difficulty's size range.
+		if fails >= attemptsPerN && n > loN {
 			n--
 			fails = 0
 		}
