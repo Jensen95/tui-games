@@ -56,8 +56,9 @@ func Decode(data []byte) (Puzzle, error) {
 }
 
 // structurallyValid checks a decoded puzzle's shape independent of solving:
-// N in the supported range, a region id per cell, exactly N connected regions
-// labeled 0..N-1, and any givens in bounds.
+// N in the supported range (minN..maxN, i.e. 5..11 — the union of the
+// per-difficulty bands in generator.go), a region id per cell, exactly N
+// connected regions labeled 0..N-1, and any givens in bounds.
 func structurallyValid(p Puzzle) error {
 	if p.N < minN || p.N > maxN {
 		return fmt.Errorf("queens: N=%d out of range %d..%d", p.N, minN, maxN)

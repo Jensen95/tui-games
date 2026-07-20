@@ -7,6 +7,41 @@ import (
 	"github.com/Jensen95/tui-games/internal/engine"
 )
 
+// TestGenerate_Expert_DeterministicAndUnique pins the audit's two Expert
+// "must hold" guarantees over the full LIG_SEEDS batch (default 250, run with
+// LIG_SEEDS=300 for the audited count): every (Expert, seed) pair is
+// byte-identical across two generations, and every Expert board has exactly one
+// solution. Expert relaxes the no-guess closure gate (see generator.go), so it
+// is not exercised by the Easy/Medium/Hard property/crosscheck batches; this
+// test is its dedicated determinism + uniqueness coverage.
+func TestGenerate_Expert_DeterministicAndUnique(t *testing.T) {
+	gen := NewGenerator()
+	solver := NewSolver()
+	// Expert generation is ~10x slower than the other tiers, so this batch runs
+	// a light default and scales to the full (300-seed) count under LIG_SEEDS.
+	n := heavyBatchSeeds(40)
+	for i := 1; i <= n; i++ {
+		seed := int64(i)
+		p1, s1, err1 := gen.Generate(engine.Expert, engine.NewRand(seed))
+		if err1 != nil {
+			t.Fatalf("Generate(Expert, seed=%d) run1 error: %v", seed, err1)
+		}
+		p2, s2, err2 := gen.Generate(engine.Expert, engine.NewRand(seed))
+		if err2 != nil {
+			t.Fatalf("Generate(Expert, seed=%d) run2 error: %v", seed, err2)
+		}
+		if !reflect.DeepEqual(p1, p2) {
+			t.Errorf("Generate(Expert, seed=%d): puzzle not deterministic:\n run1=%+v\n run2=%+v", seed, p1, p2)
+		}
+		if !reflect.DeepEqual(s1, s2) {
+			t.Errorf("Generate(Expert, seed=%d): solution not deterministic", seed)
+		}
+		if got := solver.CountSolutions(p1, 2); got != 1 {
+			t.Errorf("Generate(Expert, seed=%d): CountSolutions(p,2)=%d, want 1 (unique)", seed, got)
+		}
+	}
+}
+
 // TestGenerate_Determinism_SameSeedSamePuzzle pins: "Determinism: same seed
 // => identical board." Generating twice from engine.NewRand(seed) with the
 // same seed and difficulty must produce byte-for-byte identical Puzzle and
