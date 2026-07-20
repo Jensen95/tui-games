@@ -41,6 +41,15 @@ const ladderGuardSeeds = 12
 // exercise proof-by-contradiction, while the easier tiers remain no-guess under
 // the full oracle.
 func TestGenerate_DifficultyLadder_StaysCalibrated(t *testing.T) {
+	if raceEnabled {
+		// This guard generates Expert (N=11) boards, whose complete-solver
+		// generation is ~an order of magnitude slower under the race detector on
+		// a 2-core CI runner — enough to blow the package test timeout. The
+		// calibration properties it pins are deterministic and need no race
+		// instrumentation, so the uninstrumented LIG_SEEDS job carries this
+		// coverage.
+		t.Skip("skipped under -race: Expert N=11 generation is too slow; covered by the non-race run")
+	}
 	gen := NewGenerator()
 	solver := NewSolver()
 

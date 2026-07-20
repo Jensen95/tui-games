@@ -23,6 +23,15 @@ import (
 // demonstrates as well as a large one; broad per-seed coverage is carried by
 // the no-guess property/crosscheck batches, which run the cheaper tiers.
 func TestGenerate_Expert_DeterministicAndUnique(t *testing.T) {
+	if raceEnabled {
+		// Expert forces N=11 boards through the complete-solver uniqueness
+		// search twice per seed; under the race detector on a 2-core CI runner
+		// that is ~an order of magnitude slower and blows the package test
+		// timeout. Determinism/uniqueness need no race instrumentation
+		// (generation is single-threaded), so the uninstrumented LIG_SEEDS job
+		// carries this coverage.
+		t.Skip("skipped under -race: Expert N=11 generation is too slow; covered by the non-race run")
+	}
 	gen := NewGenerator()
 	solver := NewSolver()
 	const n = 16
