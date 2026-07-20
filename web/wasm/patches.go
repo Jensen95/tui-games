@@ -284,10 +284,22 @@ func (a patchesAdapter) hint(puzzleJSON, boardJSON, solutionJSON []byte) (hintRe
 				cellsHi = append(cellsHi, cellJSON{Row: r, Col: c})
 			}
 		}
+		// Explain WHY this rectangle: it is the tiling of the one clue it
+		// contains (every solution rectangle contains exactly one clue, per the
+		// generation invariant). Naming the clue's area and shape shows the
+		// player how the dimensions are forced — the cell count matches the
+		// clue number and the width/height match its shape word.
+		clue := p.Clues[cand.clueIdx]
+		clueCell := engine.CellAt(cand.clueIdx, p.C)
+		w, h := rect.c1-rect.c0+1, rect.r1-rect.r0+1
 		return hintResultJSON{
-			Message: fmt.Sprintf("hint: rectangle r%dc%d..r%dc%d", rect.r0+1, rect.c0+1, rect.r1+1, rect.c1+1),
-			Cells:   cellsHi,
-			Apply:   marshalApply(rectApply{R0: rect.r0, C0: rect.c0, R1: rect.r1, C1: rect.c1}),
+			Message: fmt.Sprintf(
+				"hint: rectangle r%dc%d..r%dc%d — the area-%d %s clue at r%dc%d fills as this %d×%d block",
+				rect.r0+1, rect.c0+1, rect.r1+1, rect.c1+1,
+				clue.Number, clue.Shape.String(), clueCell.Row+1, clueCell.Col+1, w, h,
+			),
+			Cells: cellsHi,
+			Apply: marshalApply(rectApply{R0: rect.r0, C0: rect.c0, R1: rect.r1, C1: rect.c1}),
 		}, nil
 	}
 	return hintResultJSON{Done: true, Message: "already solved"}, nil

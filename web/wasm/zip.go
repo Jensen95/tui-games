@@ -184,9 +184,76 @@ type pathApply struct {
 	Path []cellJSON `json:"path"`
 }
 
+// zipLegalUnvisitedNeighbors returns the cell indices reachable in one
+// orthogonal step from head that the path has not visited yet and that no wall
+// blocks — the moves the path could legally make next. Pure adjacency + wall
+// geometry; not a rule the bridge re-implements.
+func zipLegalUnvisitedNeighbors(p zip.Puzzle, head int, visited map[int]bool) []int {
+	r, c := head/p.C, head%p.C
+	cands := make([]int, 0, 4)
+	if c > 0 {
+		cands = append(cands, head-1)
+	}
+	if c < p.C-1 {
+		cands = append(cands, head+1)
+	}
+	if r > 0 {
+		cands = append(cands, head-p.C)
+	}
+	if r < p.R-1 {
+		cands = append(cands, head+p.C)
+	}
+	out := make([]int, 0, len(cands))
+	for _, nb := range cands {
+		if visited[nb] {
+			continue
+		}
+		if p.Walls[zip.WallKey(head, nb)] {
+			continue
+		}
+		out = append(out, nb)
+	}
+	return out
+}
+
+// zipHintReason derives a truthful explanation for extending the path to
+// next, given the prefix already agreed with the solution (solPath[:i]). It
+// asserts only what it can verify from the puzzle geometry: the mandatory
+// start on waypoint 1, an only-legal-move (the head has exactly one unvisited,
+// unwalled neighbor), and/or the next waypoint in ascending order. When none
+// of those pin the move (the choice follows from global reachability the
+// bridge does not re-derive), it says so honestly.
+func zipHintReason(p zip.Puzzle, solPath []int, i, next int) string {
+	if i == 0 {
+		return "every path must start on the cell numbered 1"
+	}
+	head := solPath[i-1]
+	visited := make(map[int]bool, i)
+	for _, idx := range solPath[:i] {
+		visited[idx] = true
+	}
+	onlyMove := false
+	if legal := zipLegalUnvisitedNeighbors(p, head, visited); len(legal) == 1 && legal[0] == next {
+		onlyMove = true
+	}
+	wp, isWaypoint := p.Waypoint[next]
+
+	switch {
+	case onlyMove && isWaypoint:
+		return fmt.Sprintf("the only unvisited cell the path can reach from its head without crossing a wall — and it is waypoint %d (visited in ascending order)", wp)
+	case onlyMove:
+		return "the only unvisited cell the path can reach from its head without crossing a wall"
+	case isWaypoint:
+		return fmt.Sprintf("it is waypoint %d, and waypoints must be reached in ascending order", wp)
+	default:
+		return "the next cell on the puzzle's unique path"
+	}
+}
+
 // hint mirrors internal/tui/boards/zip.go's Hint(): find the longest prefix
 // the player's path shares with the recorded solution path, then extend it
-// by exactly the next solution cell.
+// by exactly the next solution cell. The move follows the recorded solution;
+// on top of it, zipHintReason explains why that cell is the one to take next.
 func (a zipAdapter) hint(puzzleJSON, boardJSON, solutionJSON []byte) (hintResultJSON, error) {
 	p, b, err := a.decode(puzzleJSON, boardJSON)
 	if err != nil {
@@ -213,7 +280,7 @@ func (a zipAdapter) hint(puzzleJSON, boardJSON, solutionJSON []byte) (hintResult
 	newPath := append(append([]int(nil), solPath[:i]...), next)
 	cell := engine.CellAt(next, p.C)
 	return hintResultJSON{
-		Message: fmt.Sprintf("hint: extend path to r%dc%d", cell.Row+1, cell.Col+1),
+		Message: fmt.Sprintf("hint: extend path to r%dc%d — %s", cell.Row+1, cell.Col+1, zipHintReason(p, solPath, i, next)),
 		Cells:   []cellJSON{{Row: cell.Row, Col: cell.Col}},
 		Apply:   marshalApply(pathApply{Path: zipPathToCells(newPath, p.C)}),
 	}, nil
