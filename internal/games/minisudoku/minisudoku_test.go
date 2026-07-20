@@ -422,6 +422,121 @@ func TestGenerator_DeterminismSameSeed(t *testing.T) {
 	}
 }
 
+// TestGenerator_ExpertRequiresSearch is the regression guard for the Expert
+// difficulty fix. Before the fix Expert was a degenerate clone of Hard: same
+// targetClueCount, same no-guess carve invariant, just band confirmation
+// disabled — so Expert averaged the same clue count as Hard and stayed 100%
+// no-guess (with ~40% of puzzles only reaching hidden-single, i.e. Medium).
+//
+// It asserts the two properties that make Expert genuinely its own tier:
+//
+//  1. Expert's mean clue count is strictly below Hard's (it carves to a lower
+//     floor now that closure is not required during Expert carving).
+//  2. Expert's no-guess rate is well below 1.0 — most Expert puzzles do NOT
+//     close under LogicSolve, so they provably require search — while
+//     Easy/Medium/Hard stay exactly 1.0 (fully logic-solvable, unchanged).
+//
+// Deterministic (fixed seeds, engine.NewRand) and fast (a fixed, modest seed
+// count independent of LIG_SEEDS). The empirical margins are comfortable (see
+// the metrics in the fix's commit message), so the thresholds below are loose
+// enough to avoid flakiness while still failing hard if Expert ever regresses
+// back toward the Hard clone.
+func TestGenerator_ExpertRequiresSearch(t *testing.T) {
+	const seeds = 80
+
+	meanClues := func(diff engine.Difficulty) (mean float64, noGuessRate float64) {
+		g := Generator{}
+		s := Solver{}
+		totalClues, closed := 0, 0
+		for seed := int64(1); seed <= seeds; seed++ {
+			p, _, err := g.Generate(diff, engine.NewRand(seed))
+			if err != nil {
+				t.Fatalf("seed %d diff %s: Generate failed: %v", seed, diff, err)
+			}
+			// Every difficulty must always be uniquely solvable.
+			if c := s.CountSolutions(p, 2); c != 1 {
+				t.Errorf("seed %d diff %s: expected unique solution, got count=%d", seed, diff, c)
+			}
+			totalClues += len(p.Givens)
+			if _, ok, _ := s.LogicSolve(p); ok {
+				closed++
+			}
+		}
+		return float64(totalClues) / float64(seeds), float64(closed) / float64(seeds)
+	}
+
+	hardMean, hardNoGuess := meanClues(engine.Hard)
+	expertMean, expertNoGuess := meanClues(engine.Expert)
+	easyMean, easyNoGuess := meanClues(engine.Easy)
+	medMean, medNoGuess := meanClues(engine.Medium)
+	_ = easyMean
+	_ = medMean
+
+	// Property 1: Expert carves strictly sparser than Hard on average.
+	if !(expertMean < hardMean) {
+		t.Errorf("Expert mean clue count (%.3f) should be strictly below Hard's (%.3f)", expertMean, hardMean)
+	}
+
+	// Property 2: the no-guess ladder must close every Easy/Medium/Hard puzzle
+	// but only a small fraction of Expert puzzles (Expert requires search).
+	if easyNoGuess != 1.0 || medNoGuess != 1.0 || hardNoGuess != 1.0 {
+		t.Errorf("Easy/Medium/Hard must stay 100%% no-guess, got %.3f/%.3f/%.3f", easyNoGuess, medNoGuess, hardNoGuess)
+	}
+	// Loose ceiling: empirically ~0.08–0.18 over these seeds; require it to be
+	// clearly below 1.0 so a regression to the always-no-guess Hard clone
+	// fails this guard.
+	if expertNoGuess > 0.5 {
+		t.Errorf("Expert no-guess rate (%.3f) should be well below 1.0 (Expert must require search)", expertNoGuess)
+	}
+}
+
+// TestGenerator_ExpertDeterminismAndUniqueness asserts that the Expert tier —
+// which, unlike Easy/Medium/Hard, is allowed to require search — is still
+// fully deterministic (same seed ⇒ byte-identical puzzle) and always uniquely
+// solvable. The search-required acceptance gate and relaxed carve must not
+// introduce any nondeterminism or ambiguity.
+func TestGenerator_ExpertDeterminismAndUniqueness(t *testing.T) {
+	seedCount := 120 // Default; override with LIG_SEEDS for CI/nightly.
+	if s := os.Getenv("LIG_SEEDS"); s != "" {
+		if n, err := strconv.Atoi(s); err == nil && n > 0 {
+			seedCount = n
+		}
+	}
+
+	g := Generator{}
+	s := Solver{}
+	for seed := int64(1); seed <= int64(seedCount); seed++ {
+		p1, s1, err1 := g.Generate(engine.Expert, engine.NewRand(seed))
+		if err1 != nil {
+			t.Fatalf("seed %d: first Expert Generate failed: %v", seed, err1)
+		}
+		p2, s2, err2 := g.Generate(engine.Expert, engine.NewRand(seed))
+		if err2 != nil {
+			t.Fatalf("seed %d: second Expert Generate failed: %v", seed, err2)
+		}
+
+		// Byte-identical puzzle: same givens.
+		if len(p1.Givens) != len(p2.Givens) {
+			t.Fatalf("seed %d: givens count differs: %d vs %d", seed, len(p1.Givens), len(p2.Givens))
+		}
+		for idx, d := range p1.Givens {
+			if p2.Givens[idx] != d {
+				t.Errorf("seed %d: givens differ at %d: %d vs %d", seed, idx, d, p2.Givens[idx])
+			}
+		}
+		// Identical solution.
+		for i, c := range s1.Cells {
+			if s2.Cells[i] != c {
+				t.Errorf("seed %d: solutions differ at %d: %d vs %d", seed, i, c, s2.Cells[i])
+			}
+		}
+		// Uniquely solvable.
+		if c := s.CountSolutions(p1, 2); c != 1 {
+			t.Errorf("seed %d: Expert puzzle not uniquely solvable, count=%d", seed, c)
+		}
+	}
+}
+
 // ============================================================================
 // Canonicalization Tests - Deduplication
 // ============================================================================
