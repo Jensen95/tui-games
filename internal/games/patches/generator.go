@@ -40,19 +40,29 @@ const (
 // "Difficulty targeting": more Free clues raise difficulty by widening the
 // candidate search each clue admits.
 //
+// On its own freeProbability is only a coarse *pressure* toward harder
+// puzzles: it raises how many Free clues survive uniqueness tightening, which
+// the empirical audit showed does NOT by itself translate into deeper solving
+// (Easy and Medium came out statistically identical). The per-tier
+// deepest-technique FLOORS in Generate (see difficultyFloor) are what actually
+// separate Easy/Medium/Hard. A higher freeProbability still matters at the
+// harder tiers: it widens each attempt's candidate search, so more attempts
+// reach the cell-forced / contradiction-elimination rungs, letting Generate
+// meet those floors inside its retry budget rather than falling back.
+//
 // Expert uses 1.0 — every clue starts Free — so achieveUniqueness tightens the
-// bare minimum of clues needed to reach a unique solution and no more. Paired
-// with dropping the no-guess requirement (see requireClosed), this keeps the
-// maximum number of shape clues ambiguous, which is what makes Expert genuinely
-// harder than Hard rather than a near-clone of it.
+// bare minimum of clues needed for a unique solution and no more. Paired with
+// dropping the no-guess requirement (see requireClosed), that keeps the maximum
+// number of shape clues ambiguous, which is what makes Expert genuinely harder
+// than Hard rather than a near-clone of it.
 func freeProbability(diff engine.Difficulty) float64 {
 	switch diff {
 	case engine.Easy:
 		return 0.10
 	case engine.Medium:
-		return 0.35
+		return 0.45
 	case engine.Hard:
-		return 0.60
+		return 0.92
 	default: // Expert and any future tier
 		return 1.0
 	}
@@ -69,6 +79,38 @@ func freeProbability(diff engine.Difficulty) float64 {
 // closes. CountSolutions(p, 2)==1 still holds unconditionally.
 func requireClosed(diff engine.Difficulty) bool {
 	return diff != engine.Expert
+}
+
+// difficultyFloor is the minimum deepest-technique rank (see techRank) a
+// generated no-guess puzzle must require of LogicSolve to be accepted for a
+// tier. It is the *floor* the audit found missing: freeProbability set only a
+// difficulty ceiling (via uniqueness tightening), leaving Easy and Medium
+// indistinguishable because ~99% of puzzles at every tier solved on the
+// shallowest 'clue-singleton' rung. Requiring a deeper rung forces a genuinely
+// harder puzzle.
+//
+//   - Easy   -> 0: any closed puzzle is fine; the shallowest 'clue-singleton'
+//     rung is acceptable, so Generate accepts the first unique, logic-solvable
+//     puzzle exactly as it did before this change (Easy stays byte-identical).
+//   - Medium -> techRank(TechniqueCellForced): the puzzle must require the
+//     'cell-forced' rung somewhere, i.e. it cannot be solved by clue-singletons
+//     alone.
+//   - Hard   -> techRank(TechniqueContradiction): the puzzle must require the
+//     deepest no-guess rung, 'contradiction-elimination'.
+//
+// Expert floors at 0 because it never enters the floor logic at all — it owes
+// only uniqueness (see requireClosed) and returns straight out of
+// achieveUniqueness, so its deeper difficulty comes from ambiguity/search, not
+// from a ladder-technique floor.
+func difficultyFloor(diff engine.Difficulty) int {
+	switch diff {
+	case engine.Medium:
+		return techRank(TechniqueCellForced)
+	case engine.Hard:
+		return techRank(TechniqueContradiction)
+	default: // Easy, Expert, and any future tier
+		return 0
+	}
 }
 
 // seedFromRand pulls a stable per-puzzle seed value off r so the recorded
@@ -96,14 +138,39 @@ type genClue struct {
 // rectangles, derive one clue per rectangle (number = area, shape = its true
 // shape or loosened to Free per freeProbability), then tighten Free clues
 // back to their true shape — cheapest ones first via random order — only as
-// far as needed to reach a unique solution. For the no-guess tiers
-// (Easy/Medium/Hard) it then tightens further if the unique puzzle isn't yet
-// logic-solvable; Expert skips that step (see requireClosed), keeping the
-// harder minimal-tightened puzzle. Retries with a fresh partition if the goal
-// for the tier can't be reached.
+// far as needed to reach a unique solution.
+//
+// Expert owes only uniqueness (see requireClosed): it returns that
+// minimal-tightened, maximally-ambiguous puzzle straight away — deduction
+// beyond the ladder is a feature there.
+//
+// The no-guess tiers (Easy/Medium/Hard) must also close under the logic
+// ladder, tightening every remaining Free clue if the unique puzzle isn't yet
+// solvable (discarding the attempt if even that won't close). Layered on top is
+// a per-tier deepest-technique FLOOR (see difficultyFloor): a candidate is
+// accepted immediately only when the deepest technique its no-guess solve
+// required is at least the tier's floor; otherwise the attempt is remembered
+// (keeping the hardest achieved so far) and generation retries with a fresh
+// partition. This is what actually separates the tiers — before it, Easy and
+// Medium were statistically identical because nearly every puzzle solved on the
+// shallowest 'clue-singleton' rung regardless of tier.
+//
+// Fallback: if the whole retry budget is spent without clearing the floor
+// (rare — only for seeds whose partition space is stubbornly shallow), we
+// return the hardest unique, logic-solvable puzzle seen rather than erroring.
+// The puzzle is always valid and no-guess solvable; it just under-shoots its
+// tier's difficulty target for that seed. Only if no attempt produced even a
+// unique, logic-solvable puzzle do we report exhaustion.
 func (g *Generator) Generate(diff engine.Difficulty, r *rand.Rand) (*Puzzle, *Solution, error) {
 	seedVal := seedFromRand(r)
 	fp := freeProbability(diff)
+	floor := difficultyFloor(diff)
+
+	// Hardest unique, logic-solvable candidate seen so far, for graceful
+	// fallback when no attempt clears the floor within budget.
+	var bestP *Puzzle
+	var bestSol *Solution
+	bestRank := -1
 
 	for attempt := 0; attempt < genAttempts; attempt++ {
 		rects := partitionGrid(genR, genC, r)
@@ -119,23 +186,46 @@ func (g *Generator) Generate(diff engine.Difficulty, r *rand.Rand) (*Puzzle, *So
 		if !achieveUniqueness(p, gcs, solver) {
 			continue
 		}
-		// The no-guess tiers must also close under the logic ladder; if they
-		// don't yet, tighten every remaining Free clue (which can only ease the
-		// solver) and re-check, discarding the attempt if even that won't close.
-		// Expert owes only uniqueness (see requireClosed), so it keeps the
-		// minimal-tightened puzzle as-is — deduction beyond the ladder is a
-		// feature there, not a rejection cause.
-		if requireClosed(diff) {
-			if _, closed, _ := solver.LogicSolve(p); !closed {
-				tightenAllFree(p, gcs)
-				if _, closed2, _ := solver.LogicSolve(p); !closed2 {
-					continue
-				}
+
+		// Each attempt builds a fresh Puzzle (new Clues map) and is never
+		// mutated after this point, so a plain reference is a safe snapshot for
+		// the fallback — no deep copy needed.
+		sol := &Solution{Rects: append([]Rect(nil), rects...)}
+
+		// Expert owes only uniqueness (see requireClosed): keep the
+		// minimal-tightened, maximally-ambiguous puzzle straight out of
+		// achieveUniqueness — deduction beyond the ladder is a feature there,
+		// and it never enters the floor logic below.
+		if !requireClosed(diff) {
+			return p, sol, nil
+		}
+
+		// No-guess tiers must close under the logic ladder; if the unique
+		// puzzle doesn't yet, tighten every remaining Free clue (which can only
+		// ease the solver) and re-measure, discarding the attempt if even that
+		// won't close. tech is the deepest technique the closing solve needed.
+		_, closed, tech := solver.LogicSolve(p)
+		if !closed {
+			tightenAllFree(p, gcs)
+			_, closed, tech = solver.LogicSolve(p)
+			if !closed {
+				continue
 			}
 		}
 
-		sol := &Solution{Rects: append([]Rect(nil), rects...)}
-		return p, sol, nil
+		// Accept immediately once the tier's deepest-technique floor is met;
+		// otherwise remember the hardest achieved and retry for a harder one.
+		if techRank(tech) >= floor {
+			return p, sol, nil
+		}
+		if techRank(tech) > bestRank {
+			bestRank = techRank(tech)
+			bestP, bestSol = p, sol
+		}
+	}
+
+	if bestP != nil {
+		return bestP, bestSol, nil
 	}
 	return nil, nil, errors.New("patches: exhausted generation attempts")
 }
