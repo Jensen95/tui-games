@@ -22,6 +22,17 @@ const GAME_BLURBS = {
 
 const DIFFICULTIES = ["easy", "medium", "hard", "expert"];
 
+// localStorage key the current seed is persisted under, so a reload replays
+// the same puzzle instead of silently rerolling. See initialSeed()/setSeed().
+const SEED_STORAGE_KEY = "lig-seed";
+
+// After each hint the shared Hint button (and the Shift+H shortcut) is locked
+// out for this long, with a live countdown, so hints can't be spammed. Pick a
+// short, forgiving window -- long enough to nudge deliberate use, short enough
+// not to annoy. The base button label is what the countdown suffix hangs off.
+const HINT_COOLDOWN_MS = 15_000;
+const HINT_LABEL = "\u{1F4A1} Hint"; // 💡 Hint -- matches play.html's #hint-btn-label
+
 const el = {
   engineStatus: document.getElementById("engine-status"),
   difficultyGroup: document.getElementById("difficulty-group"),
@@ -33,6 +44,7 @@ const el = {
   menuBtn: document.getElementById("menu-btn"),
   resetBtn: document.getElementById("reset-btn"),
   hintBtn: document.getElementById("hint-btn"),
+  hintLabel: document.getElementById("hint-btn-label"),
   hintStatus: document.getElementById("hint-status"),
   playTitle: document.getElementById("play-title"),
   playDifficulty: document.getElementById("play-difficulty"),
@@ -48,7 +60,7 @@ const el = {
 const state = {
   screen: "menu", // "menu" | "play"
   difficulty: "easy",
-  seed: randomSeed(),
+  seed: initialSeed(),
   games: [], // [{id, name}]
   moduleCache: new Map(), // gameId -> module namespace | null (null = unavailable)
 };
@@ -58,6 +70,48 @@ let session = null;
 
 function randomSeed() {
   return Math.floor(Math.random() * 1_000_000_000);
+}
+
+// ---------- seed persistence ----------
+
+// The seed the app boots with: whatever was last stored (so a reload replays
+// the same puzzle), or a fresh random one on the very first visit -- which we
+// persist immediately so it too survives the next reload.
+function initialSeed() {
+  const stored = loadStoredSeed();
+  if (stored !== null) return stored;
+  const seed = randomSeed();
+  storeSeed(seed);
+  return seed;
+}
+
+function loadStoredSeed() {
+  try {
+    const raw = localStorage.getItem(SEED_STORAGE_KEY);
+    if (raw !== null) {
+      const parsed = Number.parseInt(raw, 10);
+      if (Number.isFinite(parsed)) return parsed;
+    }
+  } catch (err) {
+    /* localStorage unavailable (private mode / disabled) -- fall through */
+  }
+  return null;
+}
+
+function storeSeed(seed) {
+  try {
+    localStorage.setItem(SEED_STORAGE_KEY, String(seed));
+  } catch (err) {
+    /* non-fatal: the seed just won't persist across reloads */
+  }
+}
+
+// Single funnel for every seed change: keeps state, the number input, and the
+// persisted value in lockstep so a reload always restores what's on screen.
+function setSeed(seed) {
+  state.seed = seed;
+  el.seedInput.value = String(seed);
+  storeSeed(seed);
 }
 
 // ---------- boot ----------
@@ -86,11 +140,71 @@ async function boot() {
 
 function registerServiceWorker() {
   if (!("serviceWorker" in navigator)) return;
+
+  // If the page already had a controlling worker when it loaded, a later
+  // controllerchange means a freshly-activated worker has taken over (the
+  // user accepted the update) -- reload once onto the new app shell. On a
+  // first-ever visit there's no controller yet, so the clients.claim() in the
+  // worker's activate handler also fires controllerchange; don't reload for
+  // that, it's just the initial worker taking control.
+  const hadController = Boolean(navigator.serviceWorker.controller);
+  let reloading = false;
+  navigator.serviceWorker.addEventListener("controllerchange", () => {
+    if (!hadController || reloading) return;
+    reloading = true;
+    window.location.reload();
+  });
+
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("./sw.js").catch(() => {
-      /* offline support is a progressive enhancement -- ignore failures */
+    navigator.serviceWorker
+      .register("./sw.js")
+      .then((reg) => watchForWorkerUpdate(reg))
+      .catch(() => {
+        /* offline support is a progressive enhancement -- ignore failures */
+      });
+  });
+}
+
+// Watch a registration for an updated worker reaching the "installed" state
+// while an existing worker is still in control -- the signal that a new
+// version is downloaded and waiting. Bumping sw.js's CACHE_VERSION is what
+// makes the browser fetch a byte-different worker and trigger this.
+function watchForWorkerUpdate(reg) {
+  // A worker may already be waiting from a previous load that never activated.
+  if (reg.waiting && navigator.serviceWorker.controller) {
+    showUpdateBanner(reg.waiting);
+  }
+  reg.addEventListener("updatefound", () => {
+    const installing = reg.installing;
+    if (!installing) return;
+    installing.addEventListener("statechange", () => {
+      if (installing.state === "installed" && navigator.serviceWorker.controller) {
+        showUpdateBanner(installing);
+      }
     });
   });
+}
+
+// Small, non-intrusive toast telling the player a new version is ready. Its
+// Refresh button asks the waiting worker to skipWaiting(); the resulting
+// controllerchange (wired in registerServiceWorker) reloads the page.
+function showUpdateBanner(worker) {
+  if (document.getElementById("update-banner")) return; // only ever show one
+  const banner = document.createElement("div");
+  banner.id = "update-banner";
+  banner.className = "update-banner";
+  banner.setAttribute("role", "status");
+  banner.innerHTML = `
+    <span>A new version is available.</span>
+    <button type="button" class="btn btn-primary">Refresh</button>
+  `;
+  const btn = banner.querySelector("button");
+  btn.addEventListener("click", () => {
+    worker.postMessage({ type: "SKIP_WAITING" });
+    btn.disabled = true;
+    btn.textContent = "Updating…";
+  });
+  document.body.appendChild(banner);
 }
 
 // ---------- menu ----------
@@ -107,13 +221,11 @@ function wireMenuControls() {
 
   el.seedInput.addEventListener("change", () => {
     const parsed = Number.parseInt(el.seedInput.value, 10);
-    state.seed = Number.isFinite(parsed) ? parsed : state.seed;
-    el.seedInput.value = String(state.seed);
+    setSeed(Number.isFinite(parsed) ? parsed : state.seed);
   });
 
   el.rerollBtn.addEventListener("click", () => {
-    state.seed = randomSeed();
-    el.seedInput.value = String(state.seed);
+    setSeed(randomSeed());
   });
 
   el.menuBtn.addEventListener("click", () => goToMenu());
@@ -226,6 +338,7 @@ async function startGame(gameId) {
   el.boardContainer.innerHTML = "";
   el.winOverlay.hidden = true;
   clearHintStatus();
+  clearHintCooldown();
 
   const bundle = {
     puzzle: bundleData.puzzle,
@@ -254,8 +367,7 @@ async function startGame(gameId) {
 
 function restartSession() {
   if (!session) return;
-  state.seed = randomSeed();
-  el.seedInput.value = String(state.seed);
+  setSeed(randomSeed());
   startGame(session.gameId);
 }
 
@@ -277,6 +389,7 @@ function endSession() {
   el.boardContainer.innerHTML = "";
   el.winOverlay.hidden = true;
   clearHintStatus();
+  clearHintCooldown();
   session = null;
 }
 
@@ -341,6 +454,9 @@ function buildAPI(gameId, puzzle, solution, onSolvedCallback) {
     // reimplementing that UI.
     onHint(message) {
       showHintStatus(message);
+      // Every hint routes through here (button and Shift+H alike), so this is
+      // where the shared cooldown starts.
+      startHintCooldown();
     },
 
     cursorMove,
@@ -368,8 +484,57 @@ function clearHintStatus() {
 }
 
 async function requestHint() {
+  // The button is set disabled during the cooldown, but guard here too so the
+  // Shift+H path and any stray programmatic click are gated identically.
+  if (hintOnCooldown()) return;
   if (!session || !session.instance || typeof session.instance.hint !== "function") return;
   await session.instance.hint();
+}
+
+// ---------- hint cooldown ----------
+//
+// After any hint (button or Shift+H) the button is locked out for
+// HINT_COOLDOWN_MS with a live countdown baked into its label. The cooldown is
+// actually started from the api.onHint() callback -- the single funnel every
+// hint (button-driven or keyboard-driven) passes through -- so both paths are
+// covered without the shell needing to know which one fired.
+
+let hintCooldownHandle = null;
+let hintCooldownEndsAt = 0;
+
+function hintOnCooldown() {
+  return hintCooldownHandle !== null;
+}
+
+function startHintCooldown() {
+  clearHintCooldown();
+  hintCooldownEndsAt = Date.now() + HINT_COOLDOWN_MS;
+  updateHintCooldownLabel();
+  // 250ms is smooth enough for a whole-second countdown without busy-looping.
+  hintCooldownHandle = window.setInterval(updateHintCooldownLabel, 250);
+}
+
+function updateHintCooldownLabel() {
+  const remainingMs = hintCooldownEndsAt - Date.now();
+  if (remainingMs <= 0) {
+    clearHintCooldown();
+    return;
+  }
+  const secs = Math.ceil(remainingMs / 1000);
+  el.hintBtn.disabled = true;
+  el.hintBtn.setAttribute("aria-disabled", "true");
+  el.hintLabel.textContent = `${HINT_LABEL} (${secs}s)`;
+}
+
+function clearHintCooldown() {
+  if (hintCooldownHandle !== null) {
+    window.clearInterval(hintCooldownHandle);
+    hintCooldownHandle = null;
+  }
+  hintCooldownEndsAt = 0;
+  el.hintBtn.disabled = false;
+  el.hintBtn.removeAttribute("aria-disabled");
+  el.hintLabel.textContent = HINT_LABEL;
 }
 
 // ---------- timer ----------
@@ -544,6 +709,15 @@ window.addEventListener("keydown", (event) => {
 
   if (event.key === "Escape") {
     goToMenu();
+    return;
+  }
+
+  // Gate the Shift+H hint shortcut through the same cooldown as the button.
+  // The game module's handleKey would otherwise call its hint() (and thus
+  // api.hint) directly, bypassing the button's disabled state -- so swallow
+  // the event here before forwarding while the cooldown is running.
+  if (event.shiftKey && (event.key === "H" || event.key === "h") && hintOnCooldown()) {
+    event.preventDefault();
     return;
   }
 

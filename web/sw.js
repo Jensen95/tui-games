@@ -15,7 +15,7 @@
 //
 // Bump CACHE_VERSION on every deploy that changes any precached file — it's
 // the only thing that busts the old cache.
-const CACHE_VERSION = "v4";
+const CACHE_VERSION = "v5";
 const CACHE_NAME = `tui-minigames-${CACHE_VERSION}`;
 
 // The app shell. play.html and its JS are owned by a different part of this
@@ -70,9 +70,23 @@ self.addEventListener("install", (event) => {
           }
         })
       );
-      await self.skipWaiting();
+      // Deliberately NOT calling self.skipWaiting() here: an updated worker
+      // must stay in "waiting" while the old one keeps controlling open tabs,
+      // so the page can surface an "update available" prompt and let the user
+      // choose when to switch (they message SKIP_WAITING below). On a
+      // first-ever install there's no active worker to wait behind, so this
+      // one activates immediately regardless.
     })()
   );
+});
+
+// The page (app.js / index.html) posts this once the user accepts an update,
+// telling the waiting worker to activate now; that fires controllerchange in
+// the page, which reloads onto the new app shell.
+self.addEventListener("message", (event) => {
+  if (event.data && event.data.type === "SKIP_WAITING") {
+    self.skipWaiting();
+  }
 });
 
 self.addEventListener("activate", (event) => {

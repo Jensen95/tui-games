@@ -244,6 +244,20 @@ button:focus-visible,
   width: 100%;
 }
 
+/* Disabled buttons (e.g. the Hint button during its cooldown) read as
+   inert -- dimmed, no pointer, and no hover accent. */
+.btn:disabled,
+.btn[aria-disabled="true"] {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.btn-ghost:disabled:hover,
+.btn-ghost[aria-disabled="true"]:hover {
+  border-color: var(--border);
+  color: var(--text);
+}
+
 /* ---------- theme toggle ---------- */
 
 .theme-toggle {
@@ -685,6 +699,54 @@ pre.code .accent {
   color: var(--dim);
   margin: 0;
   max-width: 38rem;
+}
+
+/* ---------- service-worker update toast ---------- */
+
+/* Non-intrusive bottom-centered toast shown when the service worker has a new
+   version waiting (see app.js / index.html update detection). Uses the shared
+   surface/border tokens so it matches both themes automatically. */
+.update-banner {
+  position: fixed;
+  left: 50%;
+  bottom: 1rem;
+  transform: translateX(-50%);
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+  max-width: calc(100vw - 2rem);
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.7rem 0.9rem;
+  font-size: 0.88rem;
+  box-shadow: 0 20px 60px -20px rgba(0, 0, 0, 0.6);
+  animation: update-banner-in 0.2s ease-out;
+}
+
+.update-banner .btn {
+  padding: 0.45rem 0.9rem;
+  font-size: 0.85rem;
+  flex: none;
+}
+
+@keyframes update-banner-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 0.6rem);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .update-banner {
+    animation: none;
+  }
 }
 
 /* ---------- footer ---------- */

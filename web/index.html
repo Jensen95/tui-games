@@ -275,15 +275,65 @@
 
   <script src="./js/theme.js" defer></script>
   <script>
-    // Register the service worker for offline/installable support. play.html
-    // (owned by another agent) should perform the same registration on its
-    // own load so the app shell is cached regardless of which page a visitor
-    // lands on first — both pages point at the same ./sw.js.
+    // Register the service worker for offline/installable support, plus a
+    // minimal inline version of app.js's update detection so the landing page
+    // also tells visitors when a new version is ready. play.html runs the
+    // fuller helper (js/app.js) — both pages point at the same ./sw.js, and a
+    // CACHE_VERSION bump in sw.js is what triggers the update.
     if ("serviceWorker" in navigator) {
-      window.addEventListener("load", () => {
-        navigator.serviceWorker.register("./sw.js").catch(() => {
-          /* offline support is a progressive enhancement — ignore failures */
+      // A controllerchange after the page already had a controller means the
+      // updated worker took over (user hit Refresh) — reload onto it. On a
+      // first visit there's no prior controller, so skip that reload.
+      var hadController = Boolean(navigator.serviceWorker.controller);
+      var reloading = false;
+      navigator.serviceWorker.addEventListener("controllerchange", function () {
+        if (!hadController || reloading) return;
+        reloading = true;
+        window.location.reload();
+      });
+
+      function showUpdateBanner(worker) {
+        if (document.getElementById("update-banner")) return;
+        var banner = document.createElement("div");
+        banner.id = "update-banner";
+        banner.className = "update-banner";
+        banner.setAttribute("role", "status");
+        banner.innerHTML =
+          '<span>A new version is available.</span>' +
+          '<button type="button" class="btn btn-primary">Refresh</button>';
+        var btn = banner.querySelector("button");
+        btn.addEventListener("click", function () {
+          worker.postMessage({ type: "SKIP_WAITING" });
+          btn.disabled = true;
+          btn.textContent = "Updating…";
         });
+        document.body.appendChild(banner);
+      }
+
+      function watchForWorkerUpdate(reg) {
+        if (reg.waiting && navigator.serviceWorker.controller) {
+          showUpdateBanner(reg.waiting);
+        }
+        reg.addEventListener("updatefound", function () {
+          var installing = reg.installing;
+          if (!installing) return;
+          installing.addEventListener("statechange", function () {
+            if (installing.state === "installed" && navigator.serviceWorker.controller) {
+              showUpdateBanner(installing);
+            }
+          });
+        });
+      }
+
+      window.addEventListener("load", function () {
+        navigator.serviceWorker
+          .register("./sw.js")
+          .then(function (reg) {
+            watchForWorkerUpdate(reg);
+          })
+          .catch(function () {
+            /* offline support is a progressive enhancement — ignore failures */
+          });
       });
     }
   </script>
