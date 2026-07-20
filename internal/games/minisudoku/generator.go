@@ -34,9 +34,21 @@ import (
 // If no attempt lands exactly in the requested band within the budget,
 // Generate stays total: it relaxes to the closest band any attempt actually
 // achieved (ties broken by first-encountered, so behavior stays deterministic
-// per seed) instead of erroring. Expert requests skip band confirmation
-// entirely — the ladder makes no closed-form guarantee for that tier (see
-// 02-engine-and-generation.md "Solvability tiers").
+// per seed) instead of erroring.
+//
+// Expert takes the opposite gate. The no-guess ladder tops out at
+// pointing-pair (== Hard in bandForTechnique), so a puzzle that closes under
+// LogicSolve can never be harder than Hard. To keep Expert genuinely above
+// the ladder, Generate ACCEPTS an Expert attempt only when it is unique AND
+// LogicSolve does NOT close (the puzzle provably requires search) — the
+// engine contract lets Expert demand guessing (see engine.go). Carving to a
+// sparser floor with the closure gate relaxed (see carve/targetClueCount)
+// makes search-requiring boards the common case, so this gate is usually met
+// on the first attempt. If, within the attempt budget, every unique Expert
+// carve happened to stay no-guess, Generate stays total by falling back to
+// the sparsest such puzzle it saw (deterministic per seed) rather than
+// erroring — an honest, still-unique Expert puzzle even if search wasn't
+// forced that run.
 type Generator struct{}
 
 var _ engine.Generator[Puzzle, Solution] = Generator{}
@@ -49,7 +61,10 @@ const maxGenerateAttempts = 50
 type candidate struct {
 	puzzle   Puzzle
 	solution Solution
-	dist     int // |achieved band - requested band|, smaller is closer
+	// For no-guess tiers: |achieved band - requested band|, smaller is
+	// closer. For the Expert search-required gate: the puzzle's clue count,
+	// so the sparsest fallback wins. Either way, smaller is preferred.
+	dist int
 }
 
 // bandDistance measures how far apart two difficulty bands are on the
@@ -67,8 +82,8 @@ func (g Generator) Generate(diff engine.Difficulty, r *rand.Rand) (Puzzle, Solut
 	solver := Solver{}
 	validator := Validator{}
 
-	// Only the no-guess tiers get a confirmed-label guarantee; Expert (and
-	// any future search-based tier) keeps the requested label as-is.
+	// Only the no-guess tiers get a confirmed-label guarantee; Expert takes
+	// the search-required gate below instead.
 	confirmBand := diff == engine.Easy || diff == engine.Medium || diff == engine.Hard
 
 	var fallback *candidate
@@ -88,6 +103,22 @@ func (g Generator) Generate(diff engine.Difficulty, r *rand.Rand) (Puzzle, Solut
 			continue
 		}
 		_, closed, deepest := solver.LogicSolve(puzzle)
+
+		if diff == engine.Expert {
+			// Expert must genuinely need search: accept only if the no-guess
+			// ladder does NOT close (see the type doc comment). A closed
+			// puzzle is still unique and valid, so keep the sparsest one seen
+			// as a total-function fallback and retry for a search-requiring
+			// carve.
+			if !closed {
+				return puzzle, Solution{Cells: solCells}, nil
+			}
+			if fallback == nil || len(puzzle.Givens) < len(fallback.puzzle.Givens) {
+				fallback = &candidate{puzzle: puzzle, solution: Solution{Cells: solCells}, dist: len(puzzle.Givens)}
+			}
+			continue
+		}
+
 		if !closed {
 			continue
 		}
@@ -196,6 +227,14 @@ func fullCluePuzzle(cells []int, diff engine.Difficulty, seed int64) Puzzle {
 // at 27 clues, ~95%+ hidden-single at 16, ~60% pointing-pair at 9) while
 // Generate's bounded retry-then-relax (generator.go) covers the remainder
 // honestly instead of mislabeling.
+//
+// Expert targets 6 — strictly below Hard's 9 — a floor only reachable now
+// that Expert carving no longer requires no-guess closure (see carve). With
+// the ladder unable to exceed Hard, the point of Expert is a sparser board
+// that forces search; a lower floor than Hard is what makes Expert
+// consistently land there rather than degenerating into a sparse Hard clone.
+// Uniqueness still bounds how far carving actually gets, so 6 is the aim, not
+// a promise, and Generate's acceptance gate confirms the result needs search.
 func targetClueCount(diff engine.Difficulty) int {
 	switch diff {
 	case engine.Easy:
@@ -204,8 +243,8 @@ func targetClueCount(diff engine.Difficulty) int {
 		return 16
 	case engine.Hard:
 		return 9
-	default: // Expert (and any future tier): carve as far as possible.
-		return 9
+	default: // Expert (and any future tier): carve to a strictly lower floor.
+		return 6
 	}
 }
 
@@ -221,11 +260,24 @@ func clonePuzzle(p Puzzle) Puzzle {
 
 // carve removes givens from base one at a time, in an order shuffled by r,
 // keeping each removal only if the resulting puzzle is still uniquely
-// solvable (the complete solver, ground truth) AND fully closes under the
-// no-guess ladder (the logic solver) — the cross-validation invariant from
+// solvable (the complete solver, ground truth) AND — for the no-guess tiers
+// (Easy/Medium/Hard) — fully closes under the no-guess ladder (the logic
+// solver), the cross-validation invariant from
 // docs/plan/docs/02-engine-and-generation.md. Stops once the clue budget
 // (targetClues) is reached or every candidate has been tried once.
+//
+// Expert (base.Diff == engine.Expert) deliberately DROPS the logic-closure
+// requirement and keeps only uniqueness: the deepest implemented technique is
+// pointing-pair (== Hard's ceiling in bandForTechnique), so a carve that must
+// stay no-guess can never exceed Hard. Per engine.go, Expert only guarantees
+// a unique solution — it is permitted (and, here, intended) to require search
+// beyond the ladder. Relaxing the gate lets Expert remove clues Hard could
+// not, reaching sparser boards that genuinely need guessing.
 func carve(base Puzzle, r *rand.Rand, targetClues int) Puzzle {
+	// The no-guess tiers cross-validate every removal against LogicSolve;
+	// Expert keeps only the uniqueness invariant (see doc comment above).
+	requireClosure := base.Diff != engine.Expert
+
 	idxOrder := make([]int, 0, len(base.Givens))
 	for idx := range base.Givens {
 		idxOrder = append(idxOrder, idx)
@@ -251,8 +303,10 @@ func carve(base Puzzle, r *rand.Rand, targetClues int) Puzzle {
 		if solver.CountSolutions(trial, 2) != 1 {
 			continue
 		}
-		if _, closed, _ := solver.LogicSolve(trial); !closed {
-			continue
+		if requireClosure {
+			if _, closed, _ := solver.LogicSolve(trial); !closed {
+				continue
+			}
 		}
 		cur = trial
 	}

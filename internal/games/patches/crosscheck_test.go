@@ -89,10 +89,17 @@ func TestCrossCheck_LogicSolveMatchesUnique(t *testing.T) {
 
 			s := NewSolver(p)
 			logicSol, closed, _ := s.LogicSolve(p)
-			if !closed {
-				t.Fatalf("diff %v seed %d: LogicSolve did not close a generated puzzle", diff, seed)
+			// The no-guess tiers must close; Expert only guarantees a unique
+			// solution (engine.Difficulty contract), so it may legitimately
+			// need deduction past the ladder and not close here.
+			switch diff {
+			case engine.Easy, engine.Medium, engine.Hard:
+				if !closed {
+					t.Fatalf("diff %v seed %d: LogicSolve did not close a generated puzzle", diff, seed)
+				}
 			}
-			if !sameTiling(p, logicSol.Rects, brute[0]) {
+			// Whenever it DOES close, its tiling must still be the unique one.
+			if closed && !sameTiling(p, logicSol.Rects, brute[0]) {
 				t.Fatalf("diff %v seed %d: LogicSolve tiling differs from unique solution", diff, seed)
 			}
 		}

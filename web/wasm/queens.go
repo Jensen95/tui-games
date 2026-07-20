@@ -45,6 +45,24 @@ type queensBoardIn struct {
 	Cells [][]int `json:"cells"`
 }
 
+// queensRegionLabel returns the stable, colorblind-safe letter tag (A, B,
+// C, …) for a region index, matching internal/tui/theme.go's RegionLabel and
+// the letter the Queens TUI paints on each region. It is replicated here
+// rather than imported so the WASM bridge stays free of the TUI's
+// bubbletea/lipgloss dependencies (which need not compile under js/wasm).
+func queensRegionLabel(idx int) string {
+	if idx < 0 {
+		idx = -idx
+	}
+	const letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+	if idx < len(letters) {
+		return string(letters[idx])
+	}
+	first := idx/len(letters) - 1
+	second := idx % len(letters)
+	return string(letters[first]) + string(letters[second])
+}
+
 func queensCellsGrid(cells []queens.Cell, n int) [][]int {
 	out := make([][]int, n)
 	for r := 0; r < n; r++ {
@@ -209,10 +227,22 @@ func (a queensAdapter) hint(puzzleJSON, boardJSON, solutionJSON []byte) (hintRes
 		}
 		cellsHi = append(cellsHi, cellJSON{Row: row, Col: wantCol})
 
+		// Explain WHY this cell holds the queen. We do not re-derive the move
+		// from a solver here (the hint always follows the recorded solution),
+		// so we only assert what is always true of that solution: the placement
+		// is the one queen of this cell's region — the puzzle-specific twist
+		// that makes Queens more than "one per row/column" — and, like every
+		// queen, the sole queen of its row and column with no neighbor touching
+		// it. Naming the region (by the same A/B/C letter the board renders)
+		// points the player at the constraint that pins the cell.
+		reg := p.Region[row*n+wantCol]
 		return hintResultJSON{
-			Message: fmt.Sprintf("hint: queen at r%dc%d", row+1, wantCol+1),
-			Cells:   cellsHi,
-			Apply:   marshalApply(cellsApply{Cells: writes}),
+			Message: fmt.Sprintf(
+				"hint: queen at r%dc%d — region %s's one queen (each region, row, and column holds exactly one, and none touch)",
+				row+1, wantCol+1, queensRegionLabel(reg),
+			),
+			Cells: cellsHi,
+			Apply: marshalApply(cellsApply{Cells: writes}),
 		}, nil
 	}
 	return hintResultJSON{Done: true, Message: "already solved"}, nil

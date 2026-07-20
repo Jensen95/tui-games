@@ -1,6 +1,7 @@
 package tango
 
 import (
+	"maps"
 	"os"
 	"strconv"
 	"testing"
@@ -616,27 +617,103 @@ func TestCanonicalización_SymbolSwapYieldsSameFingerprint(t *testing.T) {
 	}
 }
 
-// TestCanonicalización_BatchFingerprintsPairwiseDistinct asserts that a batch
-// of generated puzzles all have distinct fingerprints.
+// puzzleGeometryEqual reports whether a and b carry identical fingerprinted
+// geometry: grid size, given placement/symbols, and both edge-constraint sets.
+// SeedVal and Diff are cosmetic — they never enter the Fingerprinter's
+// serialization (see serializePuzzle in fingerprint.go), so they are ignored
+// here, which lets two DIFFERENT seeds compare equal when their boards coincide.
+func puzzleGeometryEqual(a, b Puzzle) bool {
+	return a.N == b.N &&
+		maps.Equal(a.Givens, b.Givens) &&
+		maps.Equal(a.HEdges, b.HEdges) &&
+		maps.Equal(a.VEdges, b.VEdges)
+}
+
+// tangoEquivalent reports whether some element of Tango's full symmetry group
+// maps a's geometry exactly onto b — i.e. a and b are "the same puzzle up to
+// symmetry". That group has 16 members (docs/plan/games/tango.md "Uniqueness &
+// deduplication"): the 8 dihedral transforms of the square (engine.AllTransforms)
+// crossed with the identity/sun<->moon symbol swap. This is exactly the group
+// Fingerprinter.Canonical minimizes over — it emits orientPuzzle(p, t, swap)
+// for every (t, swap) pair (see fingerprint.go) — so the oracle covers the same
+// 16 orientations the canonicalizer collapses, no more and no fewer.
+//
+// It is an *independent* oracle: it remaps geometry directly via the test's
+// transformPuzzle / swapSymbols helpers and compares the resulting structures
+// field-by-field, NOT through the Canonical/Fingerprint serialization under
+// test. That independence is what lets it referee whether a shared fingerprint
+// is a genuine symmetry-duplicate or a canonicalization defect: if the oracle
+// went through Canonical it would agree with any bug by construction.
+//
+// Edge constraints are re-bucketed between the H and V sets inside
+// transformPuzzle (a 90° rotation turns a horizontal relation into a vertical
+// one — transformEdgeSet routes each pair by its transformed adjacency), so the
+// oracle honors the same H/V routing the real canonicalizer performs. The
+// symbol swap touches only givens; edge relations are symbol-independent, so
+// swapSymbols leaves the edge sets alone — matching orientPuzzle, which swaps
+// givens after transforming and never rewrites edges.
+func tangoEquivalent(a, b Puzzle) bool {
+	for _, t := range engine.AllTransforms {
+		ta := transformPuzzle(a, t)
+		if puzzleGeometryEqual(ta, b) || puzzleGeometryEqual(swapSymbols(ta), b) {
+			return true
+		}
+	}
+	return false
+}
+
+// TestCanonicalización_BatchFingerprintsPairwiseDistinct pins the intended
+// canonicalization property in the form that actually holds: equal fingerprints
+// must imply symmetry-equivalent puzzles.
+//
+// The naive form — "no two seeds ever share a fingerprint" — tests a guarantee
+// that does not exist. Two distinct seeds can legitimately produce the same
+// puzzle up to Tango's 16-member symmetry group, and the Fingerprinter is
+// *supposed* to map those onto one fingerprint (that is the whole point of
+// canonicalization). "Never a repeat" is only enforced at the retry / corpus
+// dedup layer (cmd/lig generate + internal/corpus), never per raw seed —
+// Generator.Generate takes no seen-set. Asserting per-seed uniqueness therefore
+// passes today only by luck of which seeds fall in the tested window, and would
+// false-alarm the moment a genuine symmetry-duplicate lands in range.
+//
+// The real defect worth guarding against is a lossy or over-collapsing
+// canonicalization that maps two puzzles that are NOT symmetry-equivalent onto
+// one fingerprint. So we assert exactly that: on any fingerprint collision the
+// two puzzles must be tangoEquivalent, checked by the independent oracle above.
+// This never false-alarms on entropy, so it runs the full seed count — more
+// seeds is strictly more evidence that canonicalization stays injective on
+// genuinely distinct puzzles.
 func TestCanonicalización_BatchFingerprintsPairwiseDistinct(t *testing.T) {
-	// Generate a batch of puzzles with different seeds.
-	batchSize := 10
+	n := getSeedCount()
 	g := Generator{}
 	fp := Fingerprinter{}
-	seen := make(map[[32]byte]bool)
 
-	for i := 1; i <= batchSize; i++ {
-		r := engine.NewRand(int64(i))
+	// One representative puzzle per fingerprint. Symmetry-equivalence is an
+	// equivalence relation (in particular transitive), so a new collider need
+	// only be checked against any single prior member of its fingerprint class.
+	seen := make(map[[32]byte]Puzzle, n)
+	collisions := 0
+	for seed := 1; seed <= n; seed++ {
+		r := engine.NewRand(int64(seed))
 		puzzle, _, err := g.Generate(engine.Easy, r)
 		if err != nil {
-			t.Fatalf("Generate(seed=%d) failed: %v", i, err)
+			t.Fatalf("Generate(seed=%d) failed: %v", seed, err)
 		}
-		fingerprint := fp.Fingerprint(puzzle)
-		if seen[fingerprint] {
-			t.Errorf("seed=%d: fingerprint collision detected", i)
+		f := fp.Fingerprint(puzzle)
+		if prior, dup := seen[f]; dup {
+			collisions++
+			if !tangoEquivalent(prior, puzzle) {
+				t.Errorf("seed=%d: fingerprint collision between non-equivalent puzzles "+
+					"(fingerprint %x); canonicalization is collapsing distinct puzzles", seed, f)
+			}
 		}
-		seen[fingerprint] = true
+		seen[f] = puzzle
 	}
+	// Surfaces whether the equivalence branch is actually exercised. Zero
+	// collisions is fine (Tango's Easy tier may be high-entropy enough that no
+	// two seeds coincide in the window) — the assertion still guards against a
+	// future over-collapsing canonicalization.
+	t.Logf("observed %d fingerprint collision(s) across %d seeds; all confirmed symmetry-equivalent", collisions, n)
 }
 
 // ============================================================================

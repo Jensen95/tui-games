@@ -63,6 +63,55 @@ func TestGenerator_Invariant_PerSeed(t *testing.T) {
 	}
 }
 
+// TestGenerator_SizeLadder_Monotonic is the regression guard against the
+// mid-ladder collapse this change fixed. Grid size is the only difficulty lever
+// that survives Zip's densify-to-unique loop for the no-guess tiers (see
+// sizeFor's doc comment), so if Medium and Hard ever share a size again they
+// become near-indistinguishable — precisely the defect that had Medium and Hard
+// both at 6x6 with ~93% numbered cells (and Medium even edging Hard on average
+// waypoints). This test pins the no-guess ladder to a strictly increasing cell
+// count so that collapse cannot silently return.
+//
+// It is fast and deterministic: it inspects only sizeFor's output (via the
+// dimensions on freshly generated puzzles), not any timing or seed sweep.
+//
+// Expert is treated separately. It relaxes the no-guess guarantee and is
+// distinguished from Hard by search difficulty rather than board area, so it is
+// deliberately kept at its sparse, contract-correct 6x6 and is therefore SMALLER
+// than 7x7 Hard. The ladder is strictly increasing only across Easy < Medium <
+// Hard; for Expert we assert only that it retains a fixed, sane board (>= Medium),
+// not that it is >= Hard by area.
+func TestGenerator_SizeLadder_Monotonic(t *testing.T) {
+	gen := Generator{}
+
+	cells := func(diff engine.Difficulty) int {
+		// Generate once (seed is irrelevant to dimensions, which sizeFor fixes
+		// per tier) and read the concrete R*C off the puzzle, so the guard
+		// exercises the real generated size rather than re-reading sizeFor.
+		p, _, err := gen.Generate(diff, engine.NewRand(1))
+		if err != nil {
+			t.Fatalf("Generate(%s) error: %v", diff, err)
+		}
+		return p.R * p.C
+	}
+
+	easy := cells(engine.Easy)
+	medium := cells(engine.Medium)
+	hard := cells(engine.Hard)
+	expert := cells(engine.Expert)
+
+	if !(easy < medium && medium < hard) {
+		t.Errorf("no-guess size ladder is not strictly increasing: Easy=%d, Medium=%d, Hard=%d (want Easy < Medium < Hard so the tiers stay distinguishable)", easy, medium, hard)
+	}
+
+	// Expert is ranked above Hard by search difficulty, not board area, and is
+	// intentionally sparse on a smaller board. Guard only that it keeps a sane,
+	// fixed board size (at least Medium's), not that it out-sizes Hard.
+	if expert < medium {
+		t.Errorf("Expert grid shrank below Medium: Expert=%d, Medium=%d (want Expert >= Medium)", expert, medium)
+	}
+}
+
 // assertWallsOffSolution checks that no wall blocks a step the recorded
 // solution actually takes.
 func assertWallsOffSolution(t *testing.T, p Puzzle, s Solution) {

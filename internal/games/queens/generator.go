@@ -24,18 +24,56 @@ const (
 	attemptsPerN  = 6   // failed attempts before stepping N down (worst-case cap)
 )
 
+// difficultyBand returns the inclusive [lo, hi] grid-size range a tier samples.
+// The bands are disjoint so each tier draws from a distinct size distribution
+// — Easy 5..6, Medium 7..8, Hard 9..10, Expert 11..11 — which keeps the
+// difficulty ladder monotone in N and stops Expert from re-sampling Hard's
+// sizes (the pre-audit bands were Easy 5..6 / Medium 7..8 / Hard 9..10 /
+// Expert 10..11, which overlapped Hard and Expert at N=10). The low bound
+// doubles as the per-tier step-down floor in Generate: a tier's safety-valve
+// shrink never drops N below its own band.
+//
+// Expert was audited at [11,12] but N=12 generation exceeded the ~2.5s
+// worst-case latency budget (measured worst ~2.9s), so it fell back to the
+// documented [11,11] alternative, which is still cleanly separated from Hard's
+// [9,10]. maxN tracks the largest band bound (11) accordingly.
+func difficultyBand(diff engine.Difficulty) (lo, hi int) {
+	switch diff {
+	case engine.Medium:
+		return 7, 8
+	case engine.Hard:
+		return 9, 10
+	case engine.Expert:
+		return 11, 11
+	default: // Easy and any unknown tier
+		return 5, 6
+	}
+}
+
 // Generate returns a puzzle guaranteed valid and uniquely solvable at ~diff,
 // together with its solution. All randomness (including the grid size N, which
-// the engine.Generator interface leaves to the implementation — see
-// docs/plan/games/queens.md for the supported 5..11 range) comes from r.
+// the engine.Generator interface leaves to the implementation) comes from r.
+// The grid size is drawn from the tier's disjoint band (see difficultyBand):
+// Easy 5..6, Medium 7..8, Hard 9..10, Expert 11..11 — so the supported range
+// across all tiers is 5..11.
 //
 // Strategy is solution-first per docs 02: build a full valid placement, grow
 // N connected regions each seeded by exactly one queen (which guarantees
 // one-queen-per-region), then reshape region borders to force uniqueness,
-// re-checking the complete solver after each move. The generation invariant
-// (valid, exactly one solution, logic-solvable) is enforced before returning.
+// re-checking the complete solver after each move.
+//
+// The generation invariant differs by tier per the engine contract
+// (engine.Difficulty): Easy/Medium/Hard are no-guess tiers, so the puzzle must
+// additionally close under LogicSolve. Expert only guarantees a unique solution
+// and is explicitly permitted to require guessing; its no-guess closure gate is
+// relaxed and replaced by the opposite demand — the board must NOT be closable
+// by pure forward deduction (see closesByForwardDeduction), so solving forces
+// the ladder's proof-by-contradiction step. That, together with Expert's larger
+// disjoint N band, is what lifts Expert above Hard instead of collapsing onto
+// the same no-guess difficulty.
 func (g *Generator) Generate(diff engine.Difficulty, r *rand.Rand) (Puzzle, Solution, error) {
-	n := minN + r.IntN(maxN-minN+1)
+	lo, hi := difficultyBand(diff)
+	n := lo + r.IntN(hi-lo+1)
 	solver := NewSolver()
 
 	fails := 0
@@ -43,7 +81,9 @@ func (g *Generator) Generate(diff engine.Difficulty, r *rand.Rand) (Puzzle, Solu
 		// Safety valve: a few sizes have rare seeds whose reshape keeps hitting
 		// local minima. After enough failures, step N down — still fully
 		// deterministic (driven by r) — so worst-case latency stays bounded.
-		if fails >= attemptsPerN && n > minN {
+		// The floor is the tier's low band bound, so a step-down never leaks a
+		// smaller (easier) size into a harder tier.
+		if fails >= attemptsPerN && n > lo {
 			n--
 			fails = 0
 		}
@@ -61,13 +101,78 @@ func (g *Generator) Generate(diff engine.Difficulty, r *rand.Rand) (Puzzle, Solu
 			continue
 		}
 		// makeUnique guarantees CountSolutions(p,2)==1 with sol the survivor.
-		if _, closed, _ := solver.LogicSolve(p); !closed {
-			fails++
-			continue
+		// The final per-tier gate below decides whether this unique board is
+		// accepted: no-guess tiers must close under LogicSolve, Expert must
+		// instead resist pure forward deduction.
+		if diff != engine.Expert {
+			// No-guess tiers must close under the full deduction ladder.
+			if _, closed, _ := solver.LogicSolve(p); !closed {
+				fails++
+				continue
+			}
+		} else {
+			// Expert relaxes the no-guess closure gate (the engine contract
+			// permits Expert to require guessing) and instead demands that the
+			// board genuinely EXERCISE that allowance: pure forward deduction
+			// (singletons, line-locks, set-locks) must be unable to finish it,
+			// so solving forces the ladder's proof-by-contradiction step — the
+			// deepest, trial-based ("guess and check") reasoning this game
+			// models.
+			//
+			// Why not just accept any unique board? This package's LogicSolve
+			// includes that proof-by-contradiction step and, empirically, closes
+			// essentially every uniquely-solvable Queens board — so relaxing the
+			// gate alone leaves Expert indistinguishable from a no-guess tier.
+			// Requiring forward deduction to stall is what makes Expert reliably
+			// harder than Hard beyond raw grid size. ~70% of unique N=11 boards
+			// already qualify, so this costs only a small retry factor.
+			if closesByForwardDeduction(p) {
+				fails++
+				continue
+			}
 		}
 		return p, sol, nil
 	}
 	return Puzzle{}, Solution{}, errors.New("queens: exhausted generation attempts")
+}
+
+// closesByForwardDeduction reports whether p can be solved using ONLY the
+// ladder's forward-deduction techniques — singletons, line-locks, set-locks —
+// WITHOUT the solver's proof-by-contradiction step (LogicSolve's
+// contradictionElimination, which tries a placement and rejects it on a derived
+// contradiction). It mirrors logicState.run but stops one technique short.
+//
+// The generator uses it to certify Expert difficulty: a board that returns
+// false here needs trial-based ("guess and check") reasoning to finish, which
+// is exactly the escalation over the no-guess tiers. It reads no state beyond p
+// and shares the exact deduction primitives the shipped solver uses, so the two
+// can never silently diverge.
+func closesByForwardDeduction(p Puzzle) bool {
+	st := newLogicState(p)
+	for _, g := range p.Givens {
+		c := engine.CellAt(g, p.N)
+		if !st.place(c.Row, c.Col) {
+			return false
+		}
+	}
+	for {
+		if st.solvedAll() {
+			return true
+		}
+		if st.failed || st.hasContradiction() {
+			return false
+		}
+		if st.singletons() {
+			continue
+		}
+		if st.lineLocks() {
+			continue
+		}
+		if st.setLocks() {
+			continue
+		}
+		return false // stuck without proof-by-contradiction
+	}
 }
 
 // seedFromRand pulls a stable per-puzzle seed value off r so the recorded

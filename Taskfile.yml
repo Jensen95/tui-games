@@ -30,6 +30,23 @@ tasks:
     cmds:
       - go test ./...
 
+  web:wasm:
+    desc: Build the WebAssembly bridge + copy the JS runtime into web/
+    cmds:
+      - GOOS=js GOARCH=wasm go build -trimpath -ldflags "-s -w" -o web/lig.wasm ./web/wasm
+      - cp "$(go env GOROOT)/lib/wasm/wasm_exec.js" web/js/wasm_exec.js
+
+  test:web:
+    desc: >-
+      Browser end-to-end suite for the web PWA (Playwright + Chromium).
+      Builds the wasm bridge first, then drives play.html headlessly to
+      check engine load, every game, theme toggle, seed persistence, hint
+      cooldown/explanations, and Queens touch input. Requires Playwright and
+      a Chromium build to be available.
+    deps: [web:wasm]
+    cmds:
+      - node web/tests/e2e.mjs
+
   race:
     desc: Tests with the race detector
     cmds:

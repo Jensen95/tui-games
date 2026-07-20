@@ -52,7 +52,7 @@ func TestGenerator_LatencyBudget(t *testing.T) {
 	p99 := samples[(len(samples)*99)/100]
 
 	if p99 > budget {
-		t.Errorf("Generate p99 latency = %v, want <= %v (docs/02 budget, grids up to 8x8; ours are %v)", p99, budget, "5x5/6x6")
+		t.Errorf("Generate p99 latency = %v, want <= %v (docs/02 budget, grids up to 8x8; ours are %v)", p99, budget, "5x5 Easy / 6x6 Medium+Expert / 6x7 Hard")
 	}
 	// The max is allowed some headroom over the p99 budget (a single slow
 	// outlier on a loaded CI box shouldn't flake this test), but a max many

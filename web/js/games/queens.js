@@ -23,7 +23,10 @@
 //     empty -> X -> queen -> empty.
 //   - press-and-drag paints X marks across every non-given, non-queen cell
 //     the pointer crosses (mirrors LinkedIn's drag-to-mark-X), independent
-//     of any single cell's tap-cycle.
+//     of any single cell's tap-cycle. A stroke only becomes a drag once the
+//     pointer travels past DRAG_SLOP_PX (see below); under that it stays a
+//     tap, so a finger that jitters across a cell border while tapping to
+//     place a queen still cycles that one cell instead of painting stray Xs.
 //   - long-press (~500ms), right-click, or shift-click clears a cell
 //     (both its X mark and any queen) outright.
 //
@@ -40,6 +43,17 @@ export const id = "queens";
 const REGION_TUNED = 6; // how many hand-tuned colors CSS provides (--region-0..5)
 const LONG_PRESS_MS = 500;
 const HINT_PULSE_MS = 900;
+
+// A pointer must travel at least this many CSS pixels from where it went down
+// before its stroke counts as a drag (drag-to-paint X marks). Below it, the
+// gesture is treated as a tap even if the finger drifted across a cell border
+// -- which it almost always does on a phone, where cells on an 11x11 board are
+// only a few pixels wide. Without this slop, the tiny jitter of a real finger
+// tap crossed a boundary, was misread as a drag, and painted stray X marks
+// instead of placing the queen the player was aiming for (the reported "touch
+// control is bad when placing a queen" bug). 10px matches the platform tap-slop
+// convention and stays well under any deliberate drag.
+const DRAG_SLOP_PX = 10;
 
 let stylesInjected = false;
 function ensureStyles() {
@@ -72,6 +86,10 @@ export function create(container, api, bundle) {
   let dragAnchor = null; // {row, col} while a pointer is down on a non-given cell
   let dragMoved = false;
   let dragPaintValue = false;
+  // Where the pointer first went down, so onPointerMove can require real travel
+  // (>= DRAG_SLOP_PX) before promoting the gesture from a tap to a drag.
+  let dragStartX = 0;
+  let dragStartY = 0;
   let longPressTimer = null;
   let longPressFired = false;
 
@@ -227,6 +245,8 @@ export function create(container, api, bundle) {
 
     dragAnchor = { row, col };
     dragMoved = false;
+    dragStartX = ev.clientX;
+    dragStartY = ev.clientY;
     dragPaintValue = !marks[row][col];
     longPressFired = false;
     clearLongPressTimer();
@@ -242,14 +262,19 @@ export function create(container, api, bundle) {
 
   function onPointerMove(ev) {
     if (!dragAnchor) return;
-    const hit = api.cellAt(grid, n, n, ev.clientX, ev.clientY);
-    if (hit.row === dragAnchor.row && hit.col === dragAnchor.col && !dragMoved) return;
-
+    // Until the pointer has actually travelled past the slop radius, treat the
+    // gesture as a still-pending tap -- even if it nominally crossed a cell
+    // border. This is what keeps a jittery finger tap from being misread as a
+    // drag and painting X marks when the player meant to place a queen.
     if (!dragMoved) {
+      const dx = ev.clientX - dragStartX;
+      const dy = ev.clientY - dragStartY;
+      if (dx * dx + dy * dy < DRAG_SLOP_PX * DRAG_SLOP_PX) return;
       dragMoved = true;
       clearLongPressTimer();
       paintMark(dragAnchor.row, dragAnchor.col, dragPaintValue);
     }
+    const hit = api.cellAt(grid, n, n, ev.clientX, ev.clientY);
     setCursor(hit.row, hit.col);
     paintMark(hit.row, hit.col, dragPaintValue);
   }

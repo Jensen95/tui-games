@@ -129,6 +129,116 @@ func (a minisudokuAdapter) solved(puzzleJSON, boardJSON []byte) (bool, error) {
 // internal/tui/boards/minisudoku.go's constant of the same name/value.
 const minisudokuHintFallbackTechnique engine.Technique = "solution"
 
+// minisudokuCanPlace reports whether digit d could legally go in the empty
+// cell idx on the current board: d must not already appear in that cell's
+// row, column, or 2×3 box. Mirrors the candidate bookkeeping in
+// internal/games/minisudoku/logicsolve.go's newLadder.
+func minisudokuCanPlace(cells []int, n, boxH, boxW, idx, d int) bool {
+	if cells[idx] != 0 {
+		return false
+	}
+	row, col := idx/n, idx%n
+	for c := 0; c < n; c++ {
+		if cells[row*n+c] == d {
+			return false
+		}
+	}
+	for r := 0; r < n; r++ {
+		if cells[r*n+col] == d {
+			return false
+		}
+	}
+	br, bc := (row/boxH)*boxH, (col/boxW)*boxW
+	for r := br; r < br+boxH; r++ {
+		for c := bc; c < bc+boxW; c++ {
+			if cells[r*n+c] == d {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// minisudokuOnlyCellIn reports whether idx is the ONLY cell among unit (a list
+// of cell indices) that can legally hold digit d — the definition of a hidden
+// single confined to that unit.
+func minisudokuOnlyCellIn(cells []int, n, boxH, boxW int, unit []int, idx, d int) bool {
+	seen := false
+	for _, i := range unit {
+		if !minisudokuCanPlace(cells, n, boxH, boxW, i, d) {
+			continue
+		}
+		if i != idx {
+			return false
+		}
+		seen = true
+	}
+	return seen
+}
+
+// minisudokuHintReason derives, from the CURRENT board, a truthful per-cell
+// explanation for why the empty cell at idx must hold val. It re-checks the
+// two cheapest deductions locally (it does not trust the ladder's whole-solve
+// verdict): a naked single (val is the cell's only remaining candidate) or a
+// hidden single confined to the cell's box, row, or column. It returns an
+// empty string when neither fires on this cell (a deeper technique resolved
+// it), leaving the caller to describe it via the reported ladder technique.
+func minisudokuHintReason(cells []int, n, boxH, boxW, idx, val int) string {
+	row, col := idx/n, idx%n
+
+	candCount := 0
+	for d := 1; d <= n; d++ {
+		if minisudokuCanPlace(cells, n, boxH, boxW, idx, d) {
+			candCount++
+		}
+	}
+	if candCount == 1 {
+		return fmt.Sprintf("naked single: %d is the only digit that fits — its row, column, and box already use the other %d", val, n-1)
+	}
+
+	// Hidden single, preferring the box (the sudoku-defining unit) then row,
+	// then column.
+	br, bc := (row/boxH)*boxH, (col/boxW)*boxW
+	box := make([]int, 0, n)
+	for r := br; r < br+boxH; r++ {
+		for c := bc; c < bc+boxW; c++ {
+			box = append(box, r*n+c)
+		}
+	}
+	if minisudokuOnlyCellIn(cells, n, boxH, boxW, box, idx, val) {
+		return fmt.Sprintf("hidden single: the only cell in this box that can hold a %d", val)
+	}
+	rowUnit := make([]int, n)
+	colUnit := make([]int, n)
+	for i := 0; i < n; i++ {
+		rowUnit[i] = row*n + i
+		colUnit[i] = i*n + col
+	}
+	if minisudokuOnlyCellIn(cells, n, boxH, boxW, rowUnit, idx, val) {
+		return fmt.Sprintf("hidden single: the only cell in row %d that can hold a %d", row+1, val)
+	}
+	if minisudokuOnlyCellIn(cells, n, boxH, boxW, colUnit, idx, val) {
+		return fmt.Sprintf("hidden single: the only cell in column %d that can hold a %d", col+1, val)
+	}
+	return ""
+}
+
+// minisudokuTechniqueClause describes, in words, a deduction deeper than a
+// single (or the direct-reveal fallback) — used only when minisudokuHintReason
+// could not localize the move to a naked/hidden single on this cell.
+func minisudokuTechniqueClause(t engine.Technique, val int) string {
+	switch t {
+	case minisudoku.TechniqueNakedPair:
+		return fmt.Sprintf("a naked pair in one unit clears the other candidates, leaving %d", val)
+	case minisudoku.TechniqueHiddenPair:
+		return fmt.Sprintf("a hidden pair in one unit clears the other candidates, leaving %d", val)
+	case minisudoku.TechniquePointingPair:
+		return fmt.Sprintf("box-line reduction (pointing pair) clears the other candidates, leaving %d", val)
+	default:
+		return "revealed from the solution — no single-step deduction pins it yet"
+	}
+}
+
 // hint mirrors internal/tui/boards/minisudoku.go's Hint()/minisudokuNextHint:
 // run the no-guessing ladder solver (Solver.LogicSolve) seeded with the
 // player's current board as givens, and reveal the first empty cell it
@@ -182,7 +292,18 @@ func (a minisudokuAdapter) hint(puzzleJSON, boardJSON, solutionJSON []byte) (hin
 
 	cell := engine.CellAt(idx, p.N)
 	val := solFlat[idx]
-	msg := fmt.Sprintf("hint: r%dc%d = %d (%s)", cell.Row+1, cell.Col+1, val, technique)
+	// Explain WHY this cell takes val. The Technique field keeps its documented
+	// meaning — the deepest technique the ladder needed for the whole solve,
+	// matching the TUI's "Hint used:" line — while the message describes this
+	// specific cell's reason, re-derived locally (see minisudokuHintReason).
+	// The first cell the ladder resolves is almost always itself a single, so
+	// the localized reason usually fires; when it doesn't, we fall back to a
+	// word description of the reported technique.
+	clause := minisudokuHintReason(b.Cells, p.N, p.BoxH, p.BoxW, idx, val)
+	if clause == "" {
+		clause = minisudokuTechniqueClause(technique, val)
+	}
+	msg := fmt.Sprintf("hint: r%dc%d = %d — %s", cell.Row+1, cell.Col+1, val, clause)
 	return hintResultJSON{
 		Message:   msg,
 		Technique: string(technique),

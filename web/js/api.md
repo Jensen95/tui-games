@@ -159,21 +159,45 @@ wouldn't accept.
   below — no solution was recorded to hint from). When `done` is `true`,
   `cells` is `[]` and `apply` is absent; don't try to mutate anything.
   `message` still explains why (e.g. `"already solved"`).
-- **`message`** — always a short, human-readable line describing the move,
-  safe to show verbatim in a status line (e.g.
-  `"hint: r2c4 = 3 (hidden single)"`, `"hint: queen at r3c5"`,
-  `"hint: extend path to r1c1"`, `"hint: rectangle r0c1..r0c2"`). Row/column
-  numbers in `message` are **1-indexed** for human display — everywhere else
-  in this bridge (including this same response's `cells`/`apply`) stays
-  0-indexed, per this doc's shared conventions.
-- **`technique`** — the deepest logic technique the move needed, when the
-  game can name one. Only Mini Sudoku currently populates this (one of
-  `"given"`, `"naked-single"`, `"hidden-single"`, `"naked-pair"`,
-  `"hidden-pair"`, `"pointing-pair"`, or the fallback `"solution"` when even
-  the no-guessing solver stalled and the cell had to be revealed directly —
-  see `internal/games/minisudoku/logicsolve.go`). Every other game always
-  returns `""` — the key is always present, never omitted, so callers don't
-  need an existence check, only an emptiness one.
+- **`message`** — always a short, single-line (no newlines), human-readable
+  description of the move that also explains **why** it is forced, safe to
+  show verbatim in a status line. The move itself always follows the recorded
+  solution; the reasoning appended after an em dash (`—`) is re-derived at
+  hint time and only ever asserts what the engine can actually justify — when
+  a game can only reveal the solution move without a locally-provable reason
+  for that particular cell, the line says so honestly rather than inventing
+  one. Examples:
+  - Mini Sudoku: `"hint: r2c4 = 3 — hidden single: the only cell in this box that can hold a 3"`
+  - Queens: `"hint: queen at r3c5 — region C's one queen (each region, row, and column holds exactly one, and none touch)"`
+  - Tango: `"hint: r2c4 = moon — two suns already sit to its left; a third in a row is illegal, so it must be a moon"`
+  - Zip: `"hint: extend path to r1c1 — the only unvisited cell the path can reach from its head without crossing a wall"`
+  - Patches: `"hint: rectangle r1c1..r2c2 — the area-4 wide clue at r1c2 fills as this 2×2 block"`
+
+  Row/column numbers in `message` are **1-indexed** for human display —
+  everywhere else in this bridge (including this same response's
+  `cells`/`apply`) stays 0-indexed, per this doc's shared conventions.
+- **`technique`** — the logic technique that justifies the move, when the
+  game can name one:
+  - **Mini Sudoku** reports the deepest technique the no-guess ladder needed
+    for the whole solve (one of `"given"`, `"naked-single"`,
+    `"hidden-single"`, `"naked-pair"`, `"hidden-pair"`, `"pointing-pair"`, or
+    the fallback `"solution"` when even the no-guessing solver stalled and the
+    cell had to be revealed directly — see
+    `internal/games/minisudoku/logicsolve.go`). Its `message` describes the
+    *revealed cell's own* reason, which is usually the same but may be a
+    shallower single than the whole-solve deepest.
+  - **Tango** reports the single-step rule that pins the revealed cell, when
+    one fires locally: `"edge-propagation"`, `"pair-doublet"`,
+    `"gap-sandwich"`, or `"line-count"` (the same constants
+    `internal/games/tango/logicsolve.go` uses). When no local rule forces the
+    revealed cell on its own — the hint reveals the first empty cell in
+    row-major order, not necessarily the next deduced one — `technique` is
+    `""` and the `message` says the move follows from the unique solution.
+  - **Queens, Zip, Patches** always return `""` (their reasoning lives in
+    `message`).
+
+  The key is always present, never omitted, so callers don't need an
+  existence check, only an emptiness one.
 - **`cells`** — every cell the move touches, for highlighting (e.g. Queens'
   hint may list both the cleared old queen cell and the newly placed one).
 - **`apply`** — the mutation the UI should perform, **before** calling
@@ -204,12 +228,17 @@ single):
 ```json
 {
   "done": false,
-  "message": "hint: r6c6 = 4 (hidden-single)",
+  "message": "hint: r6c6 = 4 — naked single: 4 is the only digit that fits — its row, column, and box already use the other 5",
   "technique": "hidden-single",
   "cells": [{"row":5,"col":5}],
   "apply": {"cells": [{"row":5,"col":5,"value":4}]}
 }
 ```
+
+(`message` explains the revealed cell's own reason — here a naked single on
+the current board — while `technique` still reports the deepest technique the
+whole no-guess solve required, `"hidden-single"`; the two can differ, as they
+do here.)
 
 Worked example (any game, nothing left to hint):
 
