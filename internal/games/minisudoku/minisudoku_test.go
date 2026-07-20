@@ -2,6 +2,7 @@ package minisudoku
 
 import (
 	"os"
+	"slices"
 	"strconv"
 	"testing"
 
@@ -586,33 +587,330 @@ func TestFingerprinter_TransformYieldsSameFingerprint(t *testing.T) {
 	_ = fp1
 }
 
-// TestFingerprinter_BatchFingerprintsPairwiseDistinct asserts that
-// fingerprints of multiple generated puzzles are pairwise distinct (no collisions).
+// ----------------------------------------------------------------------------
+// Independent symmetry oracle (for the batch collision test below)
+//
+// The functions in this block re-derive Mini Sudoku's symmetry group from
+// scratch, WITHOUT calling Fingerprinter.Canonical / Fingerprint. They exist
+// so the batch test can referee whether a shared fingerprint is a legitimate
+// symmetry-duplicate or a genuine canonicalization defect, using a code path
+// that is fully independent of the code under test (it compares transformed
+// grids DIRECTLY rather than through the serialize→min→hash pipeline).
+//
+// CRITICAL — group parity: this oracle must enumerate EXACTLY the group that
+// fingerprint.go's Canonical enumerates, no more and no less. Mini Sudoku has
+// the largest symmetry group of the five games, so the enumeration below is
+// deliberately a faithful, line-for-line re-implementation of that same
+// documented group:
+//
+//   - Row band/stack permutations: reorder the N/BoxH row-bands (here 3 bands
+//     of 2 rows) and, independently within each band, reorder its BoxH rows.
+//   - Column band/stack permutations: the same, applied to the N/BoxW
+//     column-stacks (here 2 stacks of 3 columns) and the BoxW columns within.
+//   - Box-preserving dihedral subset: {Identity, Rot180, FlipH, FlipV} for the
+//     non-square 2×3 box (the four transforms that never swap grid dimensions,
+//     so a 2×3 box stays a 2×3 box); all 8 dihedral transforms when BoxH==BoxW.
+//   - Digit relabeling: normalized by first-appearance order (oracleRelabel),
+//     which collapses every bijective relabeling to one form — mirroring
+//     canonicalDigits, but re-implemented here rather than borrowed.
+//
+// If this oracle were NARROWER than Canonical's group, a legitimate duplicate
+// would be misreported as a canonicalization bug (a false alarm — the very
+// thing this change removes). If it were BROADER, it could mask a real
+// over-collapsing defect. Hence the exact parity above.
+// ----------------------------------------------------------------------------
+
+// oracleGrid lays a puzzle's givens into a row-major n*n slice (0 = empty),
+// resolving geometry the same way Canonical does (fall back to the package
+// N/BoxH/BoxW when the puzzle leaves them zero).
+func oracleGrid(p Puzzle) (grid []int, n, boxH, boxW int) {
+	n, boxH, boxW = p.N, p.BoxH, p.BoxW
+	if n == 0 {
+		n, boxH, boxW = N, BoxH, BoxW
+	}
+	grid = make([]int, n*n)
+	for idx, v := range p.Givens {
+		grid[idx] = v
+	}
+	return grid, n, boxH, boxW
+}
+
+// oraclePerms returns every permutation of elems (independent of the
+// production permutations helper in fingerprint.go).
+func oraclePerms(elems []int) [][]int {
+	if len(elems) <= 1 {
+		return [][]int{append([]int(nil), elems...)}
+	}
+	var out [][]int
+	for i := range elems {
+		rest := make([]int, 0, len(elems)-1)
+		rest = append(rest, elems[:i]...)
+		rest = append(rest, elems[i+1:]...)
+		for _, p := range oraclePerms(rest) {
+			out = append(out, append([]int{elems[i]}, p...))
+		}
+	}
+	return out
+}
+
+// oracleBandPerms re-derives every row (or column) permutation reachable by
+// reordering the n/group bands and, independently within each band, its group
+// rows — the band/stack symmetry Canonical enumerates via bandStackRowPerms.
+// Each result maps output position -> source position.
+func oracleBandPerms(n, group int) [][]int {
+	numBands := n / group
+	bandIdxs := make([]int, numBands)
+	for i := range bandIdxs {
+		bandIdxs[i] = i
+	}
+	subIdxs := make([]int, group)
+	for i := range subIdxs {
+		subIdxs[i] = i
+	}
+	bandOrders := oraclePerms(bandIdxs)
+	subOrders := oraclePerms(subIdxs)
+
+	var perms [][]int
+	var build func(bandOrder []int, chosen [][]int)
+	build = func(bandOrder []int, chosen [][]int) {
+		if len(chosen) == numBands {
+			perm := make([]int, 0, n)
+			for pos, srcBand := range bandOrder {
+				for _, sub := range chosen[pos] {
+					perm = append(perm, srcBand*group+sub)
+				}
+			}
+			perms = append(perms, perm)
+			return
+		}
+		for _, sub := range subOrders {
+			build(bandOrder, append(append([][]int{}, chosen...), sub))
+		}
+	}
+	for _, bo := range bandOrders {
+		build(bo, nil)
+	}
+	return perms
+}
+
+// oracleDihedral returns the box-preserving dihedral transforms: all 8 for a
+// square box, else the four that never swap grid dimensions. Mirrors
+// boxPreservingDihedral.
+func oracleDihedral(boxH, boxW int) []engine.Transform {
+	if boxH == boxW {
+		return append([]engine.Transform(nil), engine.AllTransforms[:]...)
+	}
+	return []engine.Transform{engine.Identity, engine.Rot180, engine.FlipH, engine.FlipV}
+}
+
+// oracleRelabel renumbers digits (0 = empty) by first-appearance order
+// scanning row-major, collapsing every bijective relabeling of one grid to a
+// single form. Independent re-implementation of canonicalDigits.
+func oracleRelabel(grid []int) []int {
+	next := 1
+	seen := make(map[int]int, len(grid))
+	out := make([]int, len(grid))
+	for i, v := range grid {
+		if v == 0 {
+			continue
+		}
+		m, ok := seen[v]
+		if !ok {
+			m = next
+			seen[v] = m
+			next++
+		}
+		out[i] = m
+	}
+	return out
+}
+
+// minisudokuEquivalent reports whether puzzles a and b are the same up to Mini
+// Sudoku's symmetry group — i.e. whether SOME combination of a row band/stack
+// permutation, a column band/stack permutation, a box-preserving dihedral
+// transform, and a digit relabeling maps a's grid exactly onto b's.
+//
+// It is an INDEPENDENT re-implementation of the exact group Canonical
+// enumerates (see the block comment above): it transforms a's grid directly
+// and compares the first-appearance-relabeled result against b's likewise
+// relabeled grid, never routing through Canonical/Fingerprint. Because the
+// group is closed under composition and inverse, it suffices to test a's whole
+// orbit against b's single relabeled form; the relation is symmetric and
+// transitive, so a batch may compare each collider against one representative.
+func minisudokuEquivalent(a, b Puzzle) bool {
+	gridA, n, boxH, boxW := oracleGrid(a)
+	gridB, nb, _, _ := oracleGrid(b)
+	if n != nb {
+		return false
+	}
+	target := oracleRelabel(gridB)
+
+	rowPerms := oracleBandPerms(n, boxH)
+	colPerms := oracleBandPerms(n, boxW)
+	dihedrals := oracleDihedral(boxH, boxW)
+
+	out := make([]int, n*n)
+	for _, rp := range rowPerms {
+		for _, cp := range colPerms {
+			for _, t := range dihedrals {
+				for i := 0; i < n; i++ {
+					for j := 0; j < n; j++ {
+						dst := t.Apply(engine.Cell{Row: i, Col: j}, n, n)
+						out[dst.Row*n+dst.Col] = gridA[rp[i]*n+cp[j]]
+					}
+				}
+				if slices.Equal(oracleRelabel(out), target) {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+// transformGivens applies a row band/stack permutation, a column band/stack
+// permutation, a box-preserving dihedral transform, and (optionally) a digit
+// relabeling to p's givens, returning the transformed givens map. It mirrors
+// the position/value mapping Canonical uses, so its output is a puzzle that is
+// symmetry-equivalent to p by construction. Used only to build fixtures for
+// the oracle-validation test below.
+func transformGivens(p Puzzle, rp, cp []int, t engine.Transform, relabel map[int]int) map[int]int {
+	grid, n, _, _ := oracleGrid(p)
+	out := make([]int, n*n)
+	for i := 0; i < n; i++ {
+		for j := 0; j < n; j++ {
+			dst := t.Apply(engine.Cell{Row: i, Col: j}, n, n)
+			out[dst.Row*n+dst.Col] = grid[rp[i]*n+cp[j]]
+		}
+	}
+	g := make(map[int]int)
+	for idx, v := range out {
+		if v == 0 {
+			continue
+		}
+		if relabel != nil {
+			v = relabel[v]
+		}
+		g[idx] = v
+	}
+	return g
+}
+
+// TestMinisudokuEquivalent_OracleAgreesWithFingerprint deterministically
+// exercises BOTH branches of minisudokuEquivalent and cross-checks each
+// against the Fingerprinter, so the batch test's referee is proven correct
+// even on seed windows where no natural collision occurs.
+//
+//   - Equivalent pair: a generated puzzle and a hand-applied symmetry
+//     transform of it (band swap × stack swap × Rot180 × full digit relabel).
+//     The oracle must return true AND the two must share a fingerprint (a
+//     legitimate collision — the case the batch test must tolerate).
+//   - Non-equivalent pair: the same puzzle with one given removed. The oracle
+//     must return false AND the fingerprints must differ (the defect case the
+//     batch test must catch).
+func TestMinisudokuEquivalent_OracleAgreesWithFingerprint(t *testing.T) {
+	g := Generator{}
+	base, _, err := g.Generate(engine.Easy, engine.NewRand(7))
+	if err != nil {
+		t.Fatalf("Generate failed: %v", err)
+	}
+
+	// A concrete non-identity element of the symmetry group: swap the first
+	// two row-bands, swap the two column-stacks, rotate 180°, and relabel
+	// digits by the fixed involution d -> 7-d.
+	rowPerm := []int{2, 3, 0, 1, 4, 5} // swap bands {0,1} and {2,3}
+	colPerm := []int{3, 4, 5, 0, 1, 2} // swap the two 3-column stacks
+	relabel := map[int]int{1: 6, 2: 5, 3: 4, 4: 3, 5: 2, 6: 1}
+	equiv := Puzzle{
+		N: N, BoxH: BoxH, BoxW: BoxW,
+		Givens:  transformGivens(base, rowPerm, colPerm, engine.Rot180, relabel),
+		SeedVal: base.SeedVal, Diff: base.Diff,
+	}
+
+	f := Fingerprinter{}
+	if !minisudokuEquivalent(base, equiv) {
+		t.Error("oracle: a symmetry transform of a puzzle must be reported equivalent")
+	}
+	if f.Fingerprint(base) != f.Fingerprint(equiv) {
+		t.Error("fingerprinter: a symmetry transform of a puzzle must share its fingerprint")
+	}
+
+	// Remove one given: strictly fewer clues, so no relabel/transform can map
+	// one onto the other.
+	fewer := Puzzle{N: N, BoxH: BoxH, BoxW: BoxW, Givens: make(map[int]int, len(base.Givens)), SeedVal: base.SeedVal, Diff: base.Diff}
+	dropped := false
+	for idx, v := range base.Givens {
+		if !dropped {
+			dropped = true
+			continue
+		}
+		fewer.Givens[idx] = v
+		_ = v
+	}
+	if minisudokuEquivalent(base, fewer) {
+		t.Error("oracle: puzzles with different clue counts must not be reported equivalent")
+	}
+	if f.Fingerprint(base) == f.Fingerprint(fewer) {
+		t.Error("fingerprinter: puzzles with different clue counts must not share a fingerprint")
+	}
+}
+
+// TestFingerprinter_BatchFingerprintsPairwiseDistinct pins the deduplication
+// property in the form that actually holds: equal fingerprints must imply
+// symmetry-equivalent puzzles.
+//
+// The previous version failed on ANY repeated fingerprint across sequential
+// seeds. But two seeds can legitimately produce the same puzzle up to Mini
+// Sudoku's (large) symmetry group — band/stack row+column permutations × a
+// box-preserving dihedral subset × digit relabeling — so a shared fingerprint
+// is very often a correct duplicate, not a defect. The raw generator takes no
+// seen-set; "never a repeat" is enforced by the retry/corpus dedup layer, not
+// promised per raw seed. Asserting "no two seeds ever collide" therefore tests
+// a guarantee that does not exist and false-alarms the moment a genuine
+// symmetry-duplicate lands in the tested seed window.
+//
+// The real defect worth guarding against is a lossy or over-collapsing
+// canonicalization that maps two NON-equivalent puzzles onto one fingerprint.
+// So that is exactly what we assert: on any fingerprint collision the two
+// puzzles must be symmetry-equivalent, checked by the independent oracle above
+// (which never calls Canonical/Fingerprint). This never false-alarms on
+// entropy, so it runs the full seed count — more seeds is strictly more
+// evidence that canonicalization stays injective on distinct puzzles.
 func TestFingerprinter_BatchFingerprintsPairwiseDistinct(t *testing.T) {
-	seedCount := 10
+	seedCount := 250 // Default; override with LIG_SEEDS env var for CI/nightly.
 	if s := os.Getenv("LIG_SEEDS"); s != "" {
-		if n, err := strconv.Atoi(s); err == nil && n > 0 && n < 100 {
+		if n, err := strconv.Atoi(s); err == nil && n > 0 {
 			seedCount = n
 		}
 	}
 
+	g := Generator{}
 	f := Fingerprinter{}
-	fingerprints := make(map[[32]byte]bool)
 
+	// One representative puzzle per fingerprint. Symmetry equivalence is
+	// transitive, so comparing a new collider against any prior member of its
+	// fingerprint class is sufficient.
+	seen := make(map[[32]byte]Puzzle, seedCount)
+	collisions, equivalent := 0, 0
 	for seed := int64(1); seed <= int64(seedCount); seed++ {
-		r := engine.NewRand(seed)
-		g := Generator{}
-		puzzle, _, err := g.Generate(engine.Easy, r)
+		puzzle, _, err := g.Generate(engine.Easy, engine.NewRand(seed))
 		if err != nil {
 			t.Fatalf("seed %d: Generate failed: %v", seed, err)
 		}
-
 		fp := f.Fingerprint(puzzle)
-		if fingerprints[fp] {
-			t.Errorf("fingerprint collision: seed %d shares fingerprint with an earlier seed", seed)
+		if prior, dup := seen[fp]; dup {
+			collisions++
+			if !minisudokuEquivalent(prior, puzzle) {
+				t.Errorf("fingerprint collision between NON-equivalent puzzles at seed %d "+
+					"(fingerprint %x); canonicalization is collapsing distinct puzzles", seed, fp)
+			} else {
+				equivalent++
+			}
 		}
-		fingerprints[fp] = true
+		seen[fp] = puzzle
 	}
+	t.Logf("batch: %d seeds, %d fingerprint collisions, %d confirmed symmetry-equivalent",
+		seedCount, collisions, equivalent)
 }
 
 // ============================================================================
