@@ -17,13 +17,17 @@ import (
 //     (trivially unique).
 //  3. Carve: remove givens/edges one at a time (in random order), keeping
 //     each removal only if the puzzle stays uniquely solvable (complete
-//     solver) AND fully closes under the no-guess ladder (logic solver).
+//     solver) AND — for the no-guess tiers (Easy/Medium/Hard) — still fully
+//     closes under the no-guess ladder (logic solver). Expert deliberately
+//     drops the closure requirement (see requireClosed) so carving can push
+//     past the no-guess ceiling into puzzles that need genuine deduction.
 //  4. Stop carving once a difficulty-appropriate clue budget is reached (or
 //     no further candidate can be removed).
 //
-// The generation invariant (Solved(solution), CountSolutions==1, LogicSolve
-// closes) is re-checked before Generate returns; on failure it retries with
-// fresh randomness from r, up to a bounded number of attempts.
+// The generation invariant is re-checked before Generate returns: always
+// Solved(solution) and CountSolutions==1, plus LogicSolve closure for the
+// no-guess tiers. On failure it retries with fresh randomness from r, up to a
+// bounded number of attempts.
 type Generator struct{}
 
 var _ engine.Generator[Puzzle, Board] = Generator{}
@@ -43,13 +47,18 @@ func (g Generator) Generate(diff engine.Difficulty, r *rand.Rand) (Puzzle, Board
 
 		seed := seedFromRand(r)
 		full := fullCluePuzzle(N, solCells, diff, seed)
-		puzzle := carve(full, r, targetClueCount(diff))
+		puzzle := carve(full, r, targetClueCount(diff), requireClosed(diff))
 
 		if solver.CountSolutions(puzzle, 2) != 1 {
 			continue
 		}
-		if _, closed, _ := solver.LogicSolve(puzzle); !closed {
-			continue
+		// The no-guess tiers must additionally close under the logic ladder;
+		// Expert only owes uniqueness (see requireClosed), so a puzzle needing
+		// deduction beyond the ladder is accepted there rather than rejected.
+		if requireClosed(diff) {
+			if _, closed, _ := solver.LogicSolve(puzzle); !closed {
+				continue
+			}
 		}
 		return puzzle, solBoard, nil
 	}
@@ -140,7 +149,14 @@ func fullCluePuzzle(n int, cells []Symbol, diff engine.Difficulty, seed int64) P
 // should aim to leave, biasing harder difficulties toward fewer clues (and
 // so, in practice, a deeper technique ladder) per docs/plan/games/tango.md
 // "Difficulty targeting". Carving still never accepts a removal that breaks
-// uniqueness or no-guess closure, so this is a target, not a guarantee.
+// uniqueness (nor, for the no-guess tiers, closure), so this is a target, not
+// a guarantee.
+//
+// Expert targets 0 — i.e. "carve as far as uniqueness alone permits". Because
+// Expert also drops the closure requirement (see requireClosed), the binding
+// constraint is uniqueness rather than the no-guess ladder, so this floor is
+// what lets Expert push meaningfully below the ~10-clue ceiling the ladder
+// otherwise pins Hard (and, previously, Expert) to.
 func targetClueCount(diff engine.Difficulty) int {
 	switch diff {
 	case engine.Easy:
@@ -150,8 +166,21 @@ func targetClueCount(diff engine.Difficulty) int {
 	case engine.Hard:
 		return 10
 	default: // Expert (and any future tier): carve as far as possible.
-		return 6
+		return 0
 	}
+}
+
+// requireClosed reports whether the carve/accept steps must keep the puzzle
+// solvable by the no-guess deduction ladder. Easy/Medium/Hard are contracted
+// to be no-guess (engine.Difficulty doc comment: they are "guaranteed
+// logic-solvable without guessing"), so closure is required there. Expert is
+// contracted to guarantee only a unique solution, so closure is NOT required:
+// relaxing it is precisely the lever that makes Expert harder, because it lets
+// carving remove clues whose loss would break the ladder — producing puzzles
+// that genuinely require deduction past it, while CountSolutions==1 still
+// holds unconditionally.
+func requireClosed(diff engine.Difficulty) bool {
+	return diff != engine.Expert
 }
 
 // clueKind distinguishes the three kinds of removable clues.
@@ -217,11 +246,14 @@ func clueCount(p Puzzle) int {
 
 // carve removes clues from base one at a time, in an order shuffled by r,
 // keeping each removal only if the resulting puzzle is still uniquely
-// solvable (the complete solver, ground truth) AND fully closes under the
-// no-guess ladder (the logic solver) — the cross-validation invariant from
-// docs/plan/docs/02-engine-and-generation.md. Stops once the clue budget
-// (targetClues) is reached or every candidate has been tried once.
-func carve(base Puzzle, r *rand.Rand, targetClues int) Puzzle {
+// solvable (the complete solver, ground truth). When requireClosed is set
+// (the no-guess tiers) a removal is additionally rejected unless the puzzle
+// still fully closes under the no-guess ladder (the logic solver) — the
+// cross-validation invariant from docs/plan/docs/02-engine-and-generation.md.
+// Expert passes requireClosed=false so carving may drop clues past the
+// no-guess ceiling, stopping only when uniqueness would break (or the clue
+// budget targetClues is reached, or every candidate has been tried once).
+func carve(base Puzzle, r *rand.Rand, targetClues int, requireClosed bool) Puzzle {
 	refs := buildClueRefs(base.N)
 	r.Shuffle(len(refs), func(i, j int) { refs[i], refs[j] = refs[j], refs[i] })
 
@@ -244,8 +276,10 @@ func carve(base Puzzle, r *rand.Rand, targetClues int) Puzzle {
 		if solver.CountSolutions(trial, 2) != 1 {
 			continue
 		}
-		if _, closed, _ := solver.LogicSolve(trial); !closed {
-			continue
+		if requireClosed {
+			if _, closed, _ := solver.LogicSolve(trial); !closed {
+				continue
+			}
 		}
 		cur = trial
 	}

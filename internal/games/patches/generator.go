@@ -39,6 +39,12 @@ const (
 // its tightest label (Square/Wide/Tall) to Free, per docs/plan/games/patches.md
 // "Difficulty targeting": more Free clues raise difficulty by widening the
 // candidate search each clue admits.
+//
+// Expert uses 1.0 — every clue starts Free — so achieveUniqueness tightens the
+// bare minimum of clues needed to reach a unique solution and no more. Paired
+// with dropping the no-guess requirement (see requireClosed), this keeps the
+// maximum number of shape clues ambiguous, which is what makes Expert genuinely
+// harder than Hard rather than a near-clone of it.
 func freeProbability(diff engine.Difficulty) float64 {
 	switch diff {
 	case engine.Easy:
@@ -48,8 +54,21 @@ func freeProbability(diff engine.Difficulty) float64 {
 	case engine.Hard:
 		return 0.60
 	default: // Expert and any future tier
-		return 0.75
+		return 1.0
 	}
+}
+
+// requireClosed reports whether a generated puzzle must be solvable by the
+// no-guess deduction ladder (Solver.LogicSolve closing). Easy/Medium/Hard are
+// contracted to be no-guess (engine.Difficulty doc comment: "guaranteed
+// logic-solvable without guessing"), so closure is required there. Expert is
+// contracted to guarantee only a unique solution, so closure is NOT required:
+// relaxing it lets Generate keep the minimal-tightened, maximally-ambiguous
+// puzzle straight out of achieveUniqueness — one that may require deduction
+// past the ladder — instead of tightening it back down until the ladder
+// closes. CountSolutions(p, 2)==1 still holds unconditionally.
+func requireClosed(diff engine.Difficulty) bool {
+	return diff != engine.Expert
 }
 
 // seedFromRand pulls a stable per-puzzle seed value off r so the recorded
@@ -77,9 +96,11 @@ type genClue struct {
 // rectangles, derive one clue per rectangle (number = area, shape = its true
 // shape or loosened to Free per freeProbability), then tighten Free clues
 // back to their true shape — cheapest ones first via random order — only as
-// far as needed to reach a unique solution, and further still if that isn't
-// yet logic-solvable. Retries with a fresh partition if either goal can't be
-// reached.
+// far as needed to reach a unique solution. For the no-guess tiers
+// (Easy/Medium/Hard) it then tightens further if the unique puzzle isn't yet
+// logic-solvable; Expert skips that step (see requireClosed), keeping the
+// harder minimal-tightened puzzle. Retries with a fresh partition if the goal
+// for the tier can't be reached.
 func (g *Generator) Generate(diff engine.Difficulty, r *rand.Rand) (*Puzzle, *Solution, error) {
 	seedVal := seedFromRand(r)
 	fp := freeProbability(diff)
@@ -98,10 +119,18 @@ func (g *Generator) Generate(diff engine.Difficulty, r *rand.Rand) (*Puzzle, *So
 		if !achieveUniqueness(p, gcs, solver) {
 			continue
 		}
-		if _, closed, _ := solver.LogicSolve(p); !closed {
-			tightenAllFree(p, gcs)
-			if _, closed2, _ := solver.LogicSolve(p); !closed2 {
-				continue
+		// The no-guess tiers must also close under the logic ladder; if they
+		// don't yet, tighten every remaining Free clue (which can only ease the
+		// solver) and re-check, discarding the attempt if even that won't close.
+		// Expert owes only uniqueness (see requireClosed), so it keeps the
+		// minimal-tightened puzzle as-is — deduction beyond the ladder is a
+		// feature there, not a rejection cause.
+		if requireClosed(diff) {
+			if _, closed, _ := solver.LogicSolve(p); !closed {
+				tightenAllFree(p, gcs)
+				if _, closed2, _ := solver.LogicSolve(p); !closed2 {
+					continue
+				}
 			}
 		}
 
