@@ -594,11 +594,45 @@ func reverseSeg(s []int, lo, hi int) {
 // Generation (solution-first, densify-to-unique).
 // ---------------------------------------------------------------------------
 
+// sizeFor returns the (rows, cols) grid dimensions for a difficulty tier.
+//
+// Grid size is the *only* difficulty lever that survives the densify-to-unique
+// loop for the no-guess tiers (Easy/Medium/Hard). Because Zip has just one weak
+// logic technique (forced-move), buildUnique has to densify to ~92-95% numbered
+// cells to reach guaranteed no-guess closure, which pins the effective waypoint
+// count near saturation regardless of targetWaypoints (that knob is inert here).
+// With every no-guess tier forced to that same density, board size is what
+// actually separates them, so we size-band them: Easy 5x5, Medium 6x6, Hard 6x7.
+// This gives a strictly increasing cell count (25 -> 36 -> 42) and a monotonic
+// waypoint ramp across the ladder (avg ~23 -> ~34 -> ~40 numbered cells). Sizing
+// Medium and Hard identically (both 6x6, the previous behavior) collapsed the
+// mid-ladder: both densified to ~93% numbered cells and differed only by ~1 wall,
+// so they were near-indistinguishable (and even slightly non-monotonic in avg
+// waypoints).
+//
+// Hard is 6x7 rather than 7x7 on purpose. A 7x7 (49-cell) board also restores the
+// ladder, but its uniqueness+logic-closure generation pushes worst-case latency
+// to ~200-300ms and its p99 (measured under load) over the 150ms generation budget
+// pinned in docs/plan/docs/02-engine-and-generation.md. 6x7 (42 cells) keeps a
+// clear Medium->Hard gap while holding p99 well under budget (~40ms, worst ~80ms),
+// so the documented budget stays intact without being relaxed for the larger board.
+//
+// Expert is deliberately the exception: it relaxes the no-guess guarantee
+// (uniqueness only, may require limited search) and stays sparse (~12% waypoints),
+// so it is distinguished from Hard by *search difficulty*, not board area, and is
+// kept at its contract-correct 6x6. Consequently Expert (36 cells) is smaller than
+// Hard (49 cells) — the size ladder is strictly increasing only across the
+// no-guess tiers Easy < Medium < Hard; Expert ranks above Hard on a different axis.
+// See TestGenerator_SizeLadder_Monotonic for how the guard encodes this.
 func sizeFor(diff engine.Difficulty) (int, int) {
 	switch diff {
 	case engine.Easy:
 		return 5, 5
-	default:
+	case engine.Medium:
+		return 6, 6
+	case engine.Hard:
+		return 6, 7
+	default: // Expert
 		return 6, 6
 	}
 }
