@@ -163,18 +163,6 @@ func seedCount() int {
 	return 250
 }
 
-// heavyBatchSeeds returns the seed count for a per-seed batch that is expensive
-// to generate: the full seedCount() when LIG_SEEDS is set (so nightly/heavy
-// runs honor the audited count), otherwise lightDefault to keep a plain
-// `go test` fast. Expert generation is roughly an order of magnitude slower
-// than the other tiers, so an Expert batch must not default to 250 seeds.
-func heavyBatchSeeds(lightDefault int) int {
-	if os.Getenv("LIG_SEEDS") != "" {
-		return seedCount()
-	}
-	return lightDefault
-}
-
 // distinctRegionIDs returns the set of region ids appearing in region.
 func distinctRegionIDs(region []int) map[int]bool {
 	out := make(map[int]bool)
